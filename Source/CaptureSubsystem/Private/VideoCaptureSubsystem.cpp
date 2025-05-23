@@ -63,7 +63,7 @@ void UVideoCaptureSubsystem::EndCapture()
 	}
 	else
 	{
-		UE_LOG(LogCaptureSubsystem, Error, TEXT("End called but was not capturing "));
+		UE_LOG(LogCaptureSubsystem, Warning, TEXT("End called but was not capturing "));
 	}
 }
 
@@ -87,7 +87,7 @@ void UVideoCaptureSubsystem::ForceEndCapture()
 	}
 	else
 	{
-		UE_LOG(LogCaptureSubsystem, Error, TEXT("End called but was not capturing "));
+		UE_LOG(LogCaptureSubsystem, Warning, TEXT("End called but was not capturing "));
 	}
 }
 

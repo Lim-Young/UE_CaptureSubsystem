@@ -1,4 +1,4 @@
-﻿// Copyright iraj mohtasham aurelion.net 2023
+// Copyright iraj mohtasham aurelion.net 2023
 #include "CaptureSubsystemDirector.h"
 #include "Engine/GameViewportClient.h"
 #include "Slate/SceneViewport.h"
@@ -40,6 +40,7 @@ UCaptureSubsystemDirector::UCaptureSubsystemDirector() :
 {
     OutputChannels[0] = nullptr;
     OutputChannels[1] = nullptr;
+
 }
 
 UCaptureSubsystemDirector::~UCaptureSubsystemDirector()
@@ -51,13 +52,31 @@ void UCaptureSubsystemDirector::DestroyDirector()
     if (!IsDestroy)
     {
         IsDestroy = true;
+        if (!GetWorld() || !SubmixBufferListener.IsValid()
+            || !FAudioDeviceManager::Get())
+            return;
+
         FAudioDeviceHandle AudioDeviceHandle = GetWorld()->GetAudioDevice();
-        if (&AudioDeviceHandle)
-        {
-            USoundSubmix& MainSubmixRef = AudioDeviceHandle->GetMainSubmixObject();
-            if (&MainSubmixRef)
-                AudioDeviceHandle->RegisterSubmixBufferListener(SharedThis(this), MainSubmixRef);
+        if (!AudioDeviceHandle.IsValid()) {
+            return;
         }
+
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+        if (!ConnectedSubmix.IsValid()) {
+            UE_LOG(
+                LogCaptureSubsystem, Error,
+                TEXT("USubmixListener: StopSubmixListener failed, Connected Submix is invalid."));
+            return;
+        }
+        AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.ToSharedRef(), *ConnectedSubmix.Get());
+#else
+        AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.Get());
+#endif
+        UE_LOG(LogCaptureSubsystem, Verbose, TEXT("SubmixListener: UnregisterSubmixBufferListener Called."));
+
+
+        SubmixBufferListener->OnNewSubmixBufferDelegate.Remove(OnNewSubmixBufferDelegateHandle);
+
         if (Runnable)
         {
             Runnable->Stop();
@@ -95,12 +114,23 @@ void UCaptureSubsystemDirector::ForceEndWindowReader_StandardGame(void* i)
 void UCaptureSubsystemDirector::Begin_Receive_AudioData(UWorld* World)
 {
     GameMode = World->WorldType;
-    FAudioDeviceHandle AudioDeviceHandle = World->GetAudioDevice();
-    if (AudioDeviceHandle)
+
+    if (!SubmixBufferListener.IsValid())
+        SubmixBufferListener = MakeShared<FSubmixBufferListenerImplementation>();
+
+    OnNewSubmixBufferDelegateHandle = SubmixBufferListener->OnNewSubmixBufferDelegate.AddUObject(this, &UCaptureSubsystemDirector::OnNewSubmixBuffer);
+    if (FAudioDeviceHandle AudioDeviceHandle = GetWorld()->GetAudioDevice())
     {
-        USoundSubmix& MainSubmixRef = AudioDeviceHandle->GetMainSubmixObject();
-        if (&MainSubmixRef)
-            AudioDeviceHandle->RegisterSubmixBufferListener(SharedThis(this), MainSubmixRef);
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+        ConnectedSubmix = &AudioDeviceHandle->GetMainSubmixObject();
+        AudioDeviceHandle->RegisterSubmixBufferListener(SubmixBufferListener.ToSharedRef(), *ConnectedSubmix.Get());
+#else
+        AudioDeviceHandle->RegisterSubmixBufferListener(SubmixBufferListener.Get());
+#endif
+    }
+    else
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Failed to get AudioDeviceHandle in Begin_Receive_AudioData"));
     }
 }
 
@@ -379,7 +409,12 @@ void UCaptureSubsystemDirector::Create_Audio_Encoder(const char* EncoderName)
     AudioEncoderCodecContext->codec_type = AVMEDIA_TYPE_AUDIO;
     AudioEncoderCodecContext->sample_rate = 48000;
     AudioEncoderCodecContext->sample_fmt = AV_SAMPLE_FMT_FLTP;
-    av_channel_layout_default(&AudioEncoderCodecContext->ch_layout, 2); // 2 channels = stereo
+#if LIBAVCODEC_VERSION_MAJOR < 59  // 兼容旧版本FFmpeg
+    AudioEncoderCodecContext->channel_layout = AV_CH_LAYOUT_STEREO;
+#else
+    av_channel_layout_uninit(&AudioEncoderCodecContext->ch_layout);
+    av_channel_layout_from_mask(&AudioEncoderCodecContext->ch_layout, AV_CH_LAYOUT_STEREO);
+#endif
 
     // Set the global header flag if supported by the output format
     if (OutFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
@@ -403,7 +438,12 @@ void UCaptureSubsystemDirector::Create_Audio_Encoder(const char* EncoderName)
     AudioFrame = av_frame_alloc();
     AudioFrame->nb_samples = AudioEncoderCodecContext->frame_size;
     AudioFrame->format = AudioEncoderCodecContext->sample_fmt;
-    av_channel_layout_default(&AudioFrame->ch_layout, 2); // 2 channels = stereo
+#if LIBAVCODEC_VERSION_MAJOR < 59
+    AudioFrame->channel_layout = AV_CH_LAYOUT_STEREO;
+#else
+    av_channel_layout_uninit(&AudioFrame->ch_layout);
+    av_channel_layout_from_mask(&AudioFrame->ch_layout, AV_CH_LAYOUT_STEREO);
+#endif
 
     // Allocate buffers for the audio frame
     if (const int Error = av_frame_get_buffer(AudioFrame, 0); Error < 0)
@@ -568,6 +608,12 @@ void UCaptureSubsystemDirector::Create_Audio_Swr(int NumChannels)
 
     // Initialize the audio resampler context
     swr_init(SWRContext);
+}
+
+void FSubmixBufferListenerImplementation::OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData,
+    int32 InNumSamples, int32 InNumChannels, const int32 InSampleRate, double InAudioClock)
+{
+    OnNewSubmixBufferDelegate.Broadcast(OwningSubmix, AudioData, InNumSamples, InNumChannels, InSampleRate, InAudioClock);
 }
 
 void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData, int32 NumSamples,
