@@ -8,7 +8,7 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnError,FString,ErrorText);
 class UCaptureSubsystemDirector;
 /**
- * 
+ *
  */
 USTRUCT(BlueprintType)
 struct FVideoCaptureOptions
@@ -30,7 +30,7 @@ struct FVideoCaptureOptions
 	float SoundVolume = 1.f;
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 	bool ShowUI = false;
-	//Will do (height*x)/y to get aspect ratio (useful horizontal Cropping like instagram square shaped videos). set zero to use default aspect ratio 
+	//Will do (height*x)/y to get aspect ratio (useful horizontal Cropping like instagram square shaped videos). set zero to use default aspect ratio
 	UPROPERTY(BlueprintReadWrite, EditAnywhere)
 	FVector2D OptionalCaptureAspectRatio;
 	GENERATED_BODY()
@@ -68,13 +68,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	static FString GetRecommendedPhotoFileName() ;
 	//call back to read screenshot data
-	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTexture2DRHIRef& BackBuffer);
+	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer);
 	UPROPERTY(BlueprintAssignable)
 	FOnError OnError;
-	
+
 	FSlateApplication* SlateApplication;
 
-	
+
 	FString ScreenShotPath;
 	FIntRect CaptureRect;
 	FVector2D AspectRatio;
