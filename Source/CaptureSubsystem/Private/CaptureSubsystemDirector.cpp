@@ -36,7 +36,7 @@
 		OutAudioStream(nullptr),
 		SWRContext(nullptr),
 		AudioFrame(nullptr)
-		
+
 	{
 		OutputChannels[0] = nullptr;
 		OutputChannels[1] = nullptr;
@@ -58,7 +58,7 @@
 			if(Runnable)
 			{
 				Runnable->Stop();
-				
+
 			}
 		}
 	}
@@ -187,7 +187,7 @@ void UCaptureSubsystemDirector::Begin_Receive_VideoData()
 {
 	// Bind the OnBackBufferReady_RenderThread function to the OnBackBufferReadyToPresent event
 	FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().AddUObject(this, &UCaptureSubsystemDirector::OnBackBufferReady_RenderThread);
-		
+
 }
 
 
@@ -204,7 +204,7 @@ void UCaptureSubsystemDirector::OnBackBufferReady_RenderThread(SWindow& SlateWin
 				auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTexture2DRHI();
 
 				// Determine the texture to use based on the capture options
-				GameTexture = Options.ShowUI ? BackBuffer : Texture;
+				GameTexture = Options.ShowUI ? BackBuffer.GetReference() : Texture;
 
 				// Decrease the tick time by the video tick time
 				TickTime -= VideoTickTime;
@@ -227,17 +227,17 @@ bool UCaptureSubsystemDirector::Tick(float DeltaTime)
 	{
 		// Set the frame delta time
 		FrameDeltaTime = DeltaTime;
-	
+
 		// Ensure the frame delta time is not smaller than the desired frame rate
 		if (FrameDeltaTime < 1.0 / Options.FPS)
 		{
 			FrameDeltaTime = 1.0 / Options.FPS;
 		}
-		
+
 
 		// Increase the tick time by the delta time
 		TickTime += DeltaTime;
-	
+
 		// Check if the subsystem is marked for destruction
 		if (IsDestroy)
 		{
@@ -501,7 +501,7 @@ void UCaptureSubsystemDirector::CreateEncodeThread()
 		LogErrorUE("avcodec_parameters_from_context error", Err, false);
 	}
 
-	
+
 
 		// Open the output file
 		const int Return= avio_open(&OutFormatContext->pb, out_file_name, AVIO_FLAG_WRITE);
@@ -666,13 +666,13 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 
 	void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
 {
-		
-	
+
+
 	// Update the game clock with the frame delta time
-		
+
 	GameClock += VideoData.FrameDeltaTime;
 
-		
+
 	// Drop this frame until we reach the video frame
 	if (GameClock < VideoClock)
 	{
@@ -726,7 +726,7 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 			UE_LOG(LogCaptureSubsystem, Fatal, TEXT("Video frame alloc failed"));
 		}
 
-	
+
 
 		// Allocate buffers for the video frame
 		const int Return = av_image_alloc(
@@ -739,19 +739,19 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 		);
 	Video_Frame_YUV_From_BGR(VideoFrame,BuffBgr, ShiftStride + (GameTexture->GetSizeX() - Difference / 2) - Difference / 2);
 
-	
+
 
 	// If the game FPS is less than the video FPS, add duplicate frames
 		//Cancel the first iteration subtraction We want to correct the number only if frames were duplicated
 		TickTime=TickTime+VideoTickTime;
 	while (VideoClock < GameClock)
 	{
-	
+
 		TickTime=TickTime-VideoTickTime;
 		VideoFrame->pts = VideoFrame->pkt_dts = OutVideoStream->time_base.den * VideoClock;
 		VideoFrame->duration = av_rescale_q(1, AVRational{ 1, Options.FPS }, OutVideoStream->time_base);
 		VideoClock += 1.f / Options.FPS;
-	
+
 		int ret=0;
 		avcodec_send_frame(VideoEncoderCodecContext, VideoFrame);
 		while (ret >= 0)
@@ -760,27 +760,27 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 
 			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 			{
-					
+
 				break;
 			}
 			if (ret < 0)
 			{
-				
+
 				break;
 			}
 			VideoPacket->stream_index = VideoIndex;
 
 			av_interleaved_write_frame(OutFormatContext, VideoPacket);
 		}
-		
-		
+
+
 	}
-		
-	
+
+
 		av_freep(VideoFrame->data);
 		av_packet_unref(VideoPacket);
-		
-		
+
+
 }
 
 	void UCaptureSubsystemDirector::Encode_SetCurrentAudioTime(uint8_t* rgb)
@@ -928,7 +928,7 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 		avfilter_inout_free(&Inputs);
 		avfilter_inout_free(&Outputs);
 
-		
+
 		av_frame_free(&AudioFrame);
 	}
 
@@ -950,7 +950,7 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 			Subsystem->OnError.Broadcast(ErrorMessage+" FFMPEG ERROR:"+Error);
 			Subsystem->EndCapture();
 			});
-			
+
 		}
 	}
 
@@ -958,16 +958,16 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 	{
 
 		avcodec_send_frame(VideoEncoderCodecContext, nullptr);
-	
-		
-	
+
+
+
 		AVPacket* VideoPacket = av_packet_alloc();
 
 		int ret =0;
 		while (ret >= 0)
 		{
 			ret = avcodec_receive_packet(VideoEncoderCodecContext, VideoPacket);
-					
+
 			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 			{
 				av_packet_unref(VideoPacket);
@@ -980,7 +980,7 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 			}
 			VideoPacket->stream_index = VideoIndex;
 			av_interleaved_write_frame(OutFormatContext, VideoPacket);
-					
+
 		}
 		av_packet_unref(VideoPacket);
 
@@ -1008,7 +1008,7 @@ void UCaptureSubsystemDirector::SetupEncoderContext(const AVCodec* Codec, int Bi
 		// Calculate the corrected width and height (multiples of 16)
 		const auto CorrectedWidth = OutWidth - 16 + OutWidth % 16;
 		const auto CorrectedHeight = OutHeight - 16 + OutHeight % 16;
-		
+
 
 		// Set the width and height of the video codec context based on the orientation of the video
 		VideoEncoderCodecContext->width = OutWidth < OutHeight ? CorrectedWidth : OutWidth;
