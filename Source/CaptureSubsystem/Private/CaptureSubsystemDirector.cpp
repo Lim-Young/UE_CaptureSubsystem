@@ -235,10 +235,10 @@ void UCaptureSubsystemDirector::OnBackBufferReady_RenderThread(SWindow& SlateWin
         {
             // Get the viewport client and the texture to capture
             const UCaptureGameViewportClient* ViewportClient = static_cast<UCaptureGameViewportClient*>(GetWorld()->GetGameViewport());
-            auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTexture2DRHI();
+            auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTextureRHI();
 
             // Determine the texture to use based on the capture options
-            GameTexture = Options.ShowUI ? BackBuffer.GetReference() : Texture;
+            GameTexture = Options.ShowUI ? BackBuffer : Texture;
 
             // Decrease the tick time by the video tick time
             TickTime -= VideoTickTime;
