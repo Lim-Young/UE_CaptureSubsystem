@@ -6,16 +6,16 @@
 - MultiThreaded
 - Supports showing and hiding the UI
 - Supports screenshots
-- Supports horizontal cropping  
+- Supports horizontal cropping
 Contributions are welcome.
 
 ## How to use
-First set Viewport client to CaptureGameViewportClient in project settings. then you can use these nodes:    
+First set Viewport client to CaptureGameViewportClient in project settings. then you can use these nodes:
 
-
-![](./.github/BeginRecord.png)   
+![](./.github/ProjectSetting.png)
+![](./.github/BeginRecord.png)
 ![](./.github/Photo.png)
-## TODO : 
+## TODO :
 - Clean up video capture code and algorithm and use unreal coding standard.
 - Remove deprecated libavutil functions.
 ### Made in collaboration with Serpentine Arts Technologies
