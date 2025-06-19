@@ -21,7 +21,7 @@ void UVideoCaptureSubsystem::Deinitialize()
 	ForceEndCapture();
 }
 
-void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options)
+void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTextureRenderTarget2D* InRenderTarget)
 {
 	UE_LOG(LogCaptureSubsystem, Log, TEXT("Capturing Video"));
 	GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
@@ -40,8 +40,12 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options)
 		{
 			FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FolderPath);
 		}
-	}
-	Director->Initialize_Director(GetWorld(), Options,this);
+    }
+    if (InRenderTarget)
+    {
+        Director->SetRenderTargetSource(InRenderTarget);
+    }
+    Director->Initialize_Director(GetWorld(), Options, this);
 }
 
 void UVideoCaptureSubsystem::EndCapture()

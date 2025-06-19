@@ -149,10 +149,22 @@ void UCaptureSubsystemDirector::Initialize_Director(UWorld* World, FVideoCapture
     Options = CaptureOptions;
     VideoTickTime = static_cast<float>(1) / static_cast<float>(Options.FPS);
 
-    // Get the game window and set the output width and height
-    GameWindow = GEngine->GameViewport->GetWindow().Get();
-    OutWidth = FormatSize_X(GEngine->GameViewport->Viewport->GetSizeXY().X);
-    OutHeight = GEngine->GameViewport->Viewport->GetSizeXY().Y;
+    // 判断是否有自定义RenderTarget
+    if (CustomRenderTarget)
+    {
+        OutWidth = FormatSize_X(CustomRenderTarget->SizeX);
+        OutHeight = CustomRenderTarget->SizeY;
+    }
+    else
+    {
+        // Get the game window and set the output width and height
+        GameWindow = GEngine->GameViewport->GetWindow().Get();
+        OutWidth = FormatSize_X(GEngine->GameViewport->Viewport->GetSizeXY().X);
+        OutHeight = GEngine->GameViewport->Viewport->GetSizeXY().Y;
+
+    }
+    UE_LOG(LogCaptureSubsystem, Log, TEXT("OutWidth: %d, OutHeight: %d"), OutWidth, OutHeight);
+
 
     // Calculate the crop width based on the optional capture aspect ratio
     const int Crop = Options.OptionalCaptureAspectRatio.IsZero()
@@ -224,37 +236,46 @@ void UCaptureSubsystemDirector::Begin_Receive_VideoData()
 
 }
 
+void UCaptureSubsystemDirector::SetRenderTargetSource(UTextureRenderTarget2D* InRenderTarget)
+{
+    CustomRenderTarget = InRenderTarget;
+}
+
 
 void UCaptureSubsystemDirector::OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer)
 {
-    // Check if the Slate window matches the game window
-    if (GameWindow == &SlateWindow)
+    const UCaptureGameViewportClient* ViewportClient = static_cast<UCaptureGameViewportClient*>(GetWorld()->GetGameViewport());
+    // Check if the tick time has reached the desired video tick time
+    if (TickTime >= VideoTickTime)
     {
-        // Check if the tick time has reached the desired video tick time
-        if (TickTime >= VideoTickTime)
+        if (CustomRenderTarget && CustomRenderTarget->GetResource())
+        {
+            GameTexture = CustomRenderTarget->GetResource()->GetTextureRHI();
+        }
+        // Check if the Slate window matches the game window
+        else if (GameWindow == &SlateWindow)
         {
             // Get the viewport client and the texture to capture
-            const UCaptureGameViewportClient* ViewportClient = static_cast<UCaptureGameViewportClient*>(GetWorld()->GetGameViewport());
             auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTextureRHI();
 
             // Determine the texture to use based on the capture options
             GameTexture = Options.ShowUI ? BackBuffer : Texture;
-
-            // Decrease the tick time by the video tick time
-            TickTime -= VideoTickTime;
-
-            // Check if the encoding thread and video filter are not already created
-            if (!Runnable)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Creating Encoder"))
-                    CreateEncodeThread();
-                Alloc_Video_Filter();
-            }
-
-            // Get the video data from the screen
-            GetScreenVideoData();
         }
+        // Decrease the tick time by the video tick time
+        TickTime -= VideoTickTime;
+
+        // Check if the encoding thread and video filter are not already created
+        if (!Runnable)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Creating Encoder"))
+                CreateEncodeThread();
+            Alloc_Video_Filter();
+        }
+
+        // Get the video data from the screen
+        GetScreenVideoData();
     }
+
 }
 
 bool UCaptureSubsystemDirector::Tick(float DeltaTime)
@@ -559,14 +580,14 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
         GameTexture->GetSizeX() :
         (GameTexture->GetSizeY() * Options.OptionalCaptureAspectRatio.X) /
         Options.OptionalCaptureAspectRatio.Y;
-
     // Initialize the software scaler context
     SwsContext = sws_getCachedContext(
-        SwsContext,
-        Crop, GameTexture->GetSizeY(), AV_PIX_FMT_BGR24,
-        VideoEncoderCodecContext->width, VideoEncoderCodecContext->height, AV_PIX_FMT_YUV420P,
-        SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
-    );
+            SwsContext,
+            Crop, GameTexture->GetSizeY(), AV_PIX_FMT_BGR24,
+            VideoEncoderCodecContext->width, VideoEncoderCodecContext->height, AV_PIX_FMT_YUV420P,
+            SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
+        );
+
 
     // Write the format header to the output file
     Err = avformat_write_header(OutFormatContext, nullptr);

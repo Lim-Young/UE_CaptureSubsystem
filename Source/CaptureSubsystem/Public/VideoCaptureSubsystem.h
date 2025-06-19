@@ -45,7 +45,7 @@ class CAPTURESUBSYSTEM_API UVideoCaptureSubsystem : public UGameInstanceSubsyste
 public:
 	virtual void Deinitialize() override;
 	UFUNCTION(BlueprintCallable)
-	void StartCapture(FVideoCaptureOptions Options);
+	void StartCapture(FVideoCaptureOptions Options, UTextureRenderTarget2D* InRenderTarget = nullptr);
 	UFUNCTION(BlueprintCallable)
 	void EndCapture();
 	// Force End Capture without waiting for the rest of the frames in threads

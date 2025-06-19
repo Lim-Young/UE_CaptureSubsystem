@@ -90,6 +90,8 @@ public:
     void EndWindowReader_StandardGame(void* i);
     void ForceEndWindowReader_StandardGame(void* i);
 
+    void SetRenderTargetSource(UTextureRenderTarget2D* InRenderTarget);
+
     void DestroyDirector();
 
 private:
@@ -166,6 +168,8 @@ private:
     FDelegateHandle EndPIEDelegateHandle;
 
     AVFrame* AudioFrame;
+
+    UTextureRenderTarget2D* CustomRenderTarget = nullptr;
 
     UVideoCaptureSubsystem* Subsystem;
 
