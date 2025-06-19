@@ -1065,7 +1065,7 @@ void UCaptureSubsystemDirector::SetupEncoderContext(const AVCodec* Codec, int Bi
     VideoEncoderCodecContext->height = OutWidth < OutHeight ? CorrectedHeight : OutHeight;
 
     // Set the maximum number of consecutive B-frames
-    VideoEncoderCodecContext->max_b_frames = 1;
+    VideoEncoderCodecContext->max_b_frames = 2;
 
     // Set the time base of the video codec context (numerator: 1, denominator: frames per second)
     VideoEncoderCodecContext->time_base.num = 1;
@@ -1084,24 +1084,35 @@ void UCaptureSubsystemDirector::SetupEncoderContext(const AVCodec* Codec, int Bi
     VideoEncoderCodecContext->frame_number = 1;
 
     // Set the quantization parameter for compression
-    VideoEncoderCodecContext->qcompress = 0.8;
+    VideoEncoderCodecContext->qcompress = 0.6;
 
     // Set the maximum quantization difference between frames
     VideoEncoderCodecContext->max_qdiff = 4;
 
     // Set the level of the video encoding (e.g., H.264 level)
-    VideoEncoderCodecContext->level = 30;
+    VideoEncoderCodecContext->level = 40;
 
     // Set the size of the group of pictures (GOP)
     VideoEncoderCodecContext->gop_size = 25;
 
     // Set the minimum and maximum quantization parameters
     VideoEncoderCodecContext->qmin = 18;
-    VideoEncoderCodecContext->qmax = 28;
+    VideoEncoderCodecContext->qmax = 23;
 
     // Set the motion estimation range
     VideoEncoderCodecContext->me_range = 16;
 
     // Set the frame rate of the video codec context (frames per second)
     VideoEncoderCodecContext->framerate = { Options.FPS, 1 };
+    if (VideoEncoderCodecContext->priv_data) {
+        av_opt_set(VideoEncoderCodecContext->priv_data, "preset", "fast", 0); // "p4"为NVENC实时推荐，或用"llhp"（低延迟高性能）
+        av_opt_set(VideoEncoderCodecContext->priv_data, "profile", "high", 0); // 高质量profile
+        av_opt_set(VideoEncoderCodecContext->priv_data, "rc", "vbr", 0); // 推荐VBR，实时性好，质量稳定
+        av_opt_set_int(VideoEncoderCodecContext->priv_data, "bitrate", BitRate / 1000, 0); // 单位kbps
+        av_opt_set_int(VideoEncoderCodecContext->priv_data, "maxrate", BitRate / 1000, 0);
+        av_opt_set_int(VideoEncoderCodecContext->priv_data, "bufsize", (BitRate / 1000) * 2, 0); // 缓冲区大一点更平滑
+        // 可选：低延迟
+        av_opt_set(VideoEncoderCodecContext->priv_data, "zerolatency", "1", 0);
+    }
+
 }
