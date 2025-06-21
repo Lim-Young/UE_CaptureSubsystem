@@ -111,6 +111,8 @@ private:
 
     void LogErrorUE(FString ErrorMessage, int ErrorNum, bool bFatal);
 
+    uint8 LinearToSrgb8(float Linear);
+
 private:
     bool IsDestroy = false;
     FString FilterDescription;
@@ -168,7 +170,7 @@ private:
     FDelegateHandle EndPIEDelegateHandle;
 
     AVFrame* AudioFrame;
-
+    // Format RGBA8
     UTextureRenderTarget2D* CustomRenderTarget = nullptr;
 
     UVideoCaptureSubsystem* Subsystem;

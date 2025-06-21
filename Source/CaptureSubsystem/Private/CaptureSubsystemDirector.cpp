@@ -195,7 +195,12 @@ void UCaptureSubsystemDirector::Initialize_Director(UWorld* World, FVideoCapture
     FilterDescription.Append(FString::FromInt(OutWidth));
     FilterDescription.Append(":");
     FilterDescription.Append(FString::FromInt(OutHeight));
+    // if (CustomRenderTarget)
+    // {
+    //     FilterDescription.Append(",lut=r='pow(val,1/2.2)':g='pow(val,1/2.2)':b='pow(val,1/2.2)'");
+    // }
     FilterDescription.Append("[out]");
+
 
     // Check if the output file name contains "rtmp"
     const int IsUseRTMP = Options.OutFileName.Find("rtmp");
@@ -582,11 +587,11 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
         Options.OptionalCaptureAspectRatio.Y;
     // Initialize the software scaler context
     SwsContext = sws_getCachedContext(
-            SwsContext,
-            Crop, GameTexture->GetSizeY(), AV_PIX_FMT_BGR24,
-            VideoEncoderCodecContext->width, VideoEncoderCodecContext->height, AV_PIX_FMT_YUV420P,
-            SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
-        );
+        SwsContext,
+        Crop, GameTexture->GetSizeY(), AV_PIX_FMT_BGR24,
+        VideoEncoderCodecContext->width, VideoEncoderCodecContext->height, AV_PIX_FMT_YUV420P,
+        SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
+    );
 
 
     // Write the format header to the output file
@@ -735,6 +740,14 @@ void UCaptureSubsystemDirector::Encode_Audio_Frame(const FAudioData& AudioData)
     }
 }
 
+uint8 UCaptureSubsystemDirector::LinearToSrgb8(float Linear)
+{
+    float Srgb = (Linear <= 0.0031308f)
+                            ? Linear * 12.92f
+                            : 1.055f * FMath::Pow(Linear, 1.0f / 2.4f) - 0.055f;
+    return (uint8)FMath::Clamp(int32(Srgb * 255.0f + 0.5f), 0, 255);
+}
+
 void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
 {
 
@@ -772,9 +785,21 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
                 if (PixelPtr)
                 {
                     const uint32 EncodedPixel = *PixelPtr;
-                    *(BuffBgr + 2) = (EncodedPixel >> 2) & 0xFF;
-                    *(BuffBgr + 1) = (EncodedPixel >> 12) & 0xFF;
-                    *(BuffBgr) = (EncodedPixel >> 22) & 0xFF;
+                    if (CustomRenderTarget)
+                    {
+                        // *(BuffBgr + 2) = LinearToSrgb8(((EncodedPixel >> 16) & 0xFF) / 255.0f);
+                        // *(BuffBgr + 1) = LinearToSrgb8(((EncodedPixel >> 8) & 0xFF) / 255.0f);
+                        // *(BuffBgr) = LinearToSrgb8((EncodedPixel & 0xFF) / 255.0f);
+                        *(BuffBgr + 2) = (EncodedPixel >> 16) & 0xFF;
+                        *(BuffBgr + 1) = (EncodedPixel >> 8) & 0xFF;;
+                        *(BuffBgr) = EncodedPixel & 0xFF;;
+                    }
+                    else
+                    {
+                        *(BuffBgr + 2) = (EncodedPixel >> 2) & 0xFF;
+                        *(BuffBgr + 1) = (EncodedPixel >> 12) & 0xFF;
+                        *(BuffBgr) = (EncodedPixel >> 22) & 0xFF;
+                    }
                     BuffBgr += 3;
                 }
             }
@@ -1137,3 +1162,4 @@ void UCaptureSubsystemDirector::SetupEncoderContext(const AVCodec* Codec, int Bi
     }
 
 }
+
