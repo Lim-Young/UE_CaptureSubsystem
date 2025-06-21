@@ -50,7 +50,10 @@ public:
 	void EndCapture();
 	// Force End Capture without waiting for the rest of the frames in threads
 	UFUNCTION(BlueprintCallable)
-	void ForceEndCapture();
+    void ForceEndCapture();
+
+    UFUNCTION(BlueprintCallable)
+    void SetViewportRenderingEnabled(bool bEnable);
 
 
 	UPROPERTY(Transient)

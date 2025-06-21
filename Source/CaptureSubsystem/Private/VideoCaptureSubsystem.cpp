@@ -183,3 +183,15 @@ void UVideoCaptureSubsystem::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 		UE_LOG(LogCaptureSubsystem, Error, TEXT("Texture invalid "));
 	}
 }
+
+void UVideoCaptureSubsystem::SetViewportRenderingEnabled(bool bEnable)
+{
+    if (UGameViewportClient* ViewportClient = GEngine->GameViewport)
+    {
+        ViewportClient->bDisableWorldRendering = !bEnable;
+    }
+    else
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Please set the viewport client "));
+    }
+}
