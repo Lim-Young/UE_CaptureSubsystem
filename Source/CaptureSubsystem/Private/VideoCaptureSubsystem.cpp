@@ -21,11 +21,25 @@ void UVideoCaptureSubsystem::Deinitialize()
     ForceEndCapture();
 }
 
+void UVideoCaptureSubsystem::OnFinishCapture(FString ExportPath)
+{
+    OnFinishCapture.Broadcast(ExportPath);
+    Director = nullptr; // Clear the director reference after finishing encoding
+}
+
 void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTextureRenderTarget2D* InRenderTarget)
 {
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Capturing Video"));
+    GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
+    GEngine->GetGameUserSettings()->ApplySettings(false);
+    if(Director)
+    {
+        UE_LOG(LogCaptureSubsystem, Warning, TEXT("Already capturing video, please end the current capture first."));
+        OnError.Broadcast(TEXT("Already capturing video, please end or waitting the current capture first."));
+        return;
+    }
     Director = NewObject<UCaptureSubsystemDirector>(this);
-    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnEncodeFinish);
+    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnFinishCapture);
     if (Options.OutFileName.IsEmpty())
     {
         Options.OutFileName = GetRecommendedVideoFileName();
@@ -39,6 +53,7 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
             FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FolderPath);
         }
     }
+    VideoFileName = Options.OutFileName;
     if (InRenderTarget)
     {
         bIsUsingRenderTarget = true;
@@ -47,9 +62,6 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
     else
     {
         bIsUsingRenderTarget = false;
-        GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
-        GEngine->GetGameUserSettings()->ApplySettings(false);
-
     }
     Director->Initialize_Director(GetWorld(), Options, this);
 }
@@ -59,21 +71,17 @@ void UVideoCaptureSubsystem::EndCapture()
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Ending Video"));
     if (Director)
     {
-        if (!bIsUsingRenderTarget)
+        if (GetWorld()->WorldType == EWorldType::Game)
         {
-            if (GetWorld()->WorldType == EWorldType::Game)
-            {
-                Director->EndWindowReader_StandardGame(nullptr);
-            }
-#if WITH_EDITOR
-            if (GetWorld()->WorldType == EWorldType::PIE)
-            {
-                Director->EndWindowReader(false);
-            }
-#endif
+            Director->EndWindowReader_StandardGame(nullptr);
         }
-
-        Director = nullptr;
+#if WITH_EDITOR
+        if (GetWorld()->WorldType == EWorldType::PIE)
+        {
+            Director->EndWindowReader(false);
+        }
+#endif
+        // Director = nullptr;
     }
     else
     {
@@ -97,6 +105,7 @@ void UVideoCaptureSubsystem::ForceEndCapture()
             Director->ForceEndWindowReader_StandardGame(nullptr);
         }
 #endif
+        OnFinishCapture.Broadcast(VideoFileName);
         Director = nullptr;
     }
     else

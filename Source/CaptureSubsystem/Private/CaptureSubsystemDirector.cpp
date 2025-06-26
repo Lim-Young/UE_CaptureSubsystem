@@ -88,27 +88,20 @@ void UCaptureSubsystemDirector::DestroyDirector()
 void UCaptureSubsystemDirector::EndWindowReader(const bool i)
 {
     DestroyDirector();
-    this->RemoveFromRoot();
-    this->ConditionalBeginDestroy();
-    this->BeginDestroy();
 }
 
 void UCaptureSubsystemDirector::EndWindowReader_StandardGame(void* i)
 {
     DestroyDirector();
-    this->RemoveFromRoot();
-    this->ConditionalBeginDestroy();
-    this->BeginDestroy();
 }
 
 void UCaptureSubsystemDirector::ForceEndWindowReader_StandardGame(void* i)
 {
-
+    Encode_Finish();
     DestroyDirector();
     this->RemoveFromRoot();
     this->ConditionalBeginDestroy();
     this->BeginDestroy();
-    Encode_Finish();
 }
 
 void UCaptureSubsystemDirector::Begin_Receive_AudioData(UWorld* World)
@@ -232,6 +225,7 @@ void UCaptureSubsystemDirector::Initialize_Director(UWorld* World, FVideoCapture
     // Add end function and tick function delegates
     AddEndFunction();
     AddTickFunction();
+    IsEncoding = true;
 }
 
 void UCaptureSubsystemDirector::Begin_Receive_VideoData()
@@ -332,6 +326,9 @@ bool UCaptureSubsystemDirector::Tick(float DeltaTime)
             FMemory::Free(OutputChannels[0]);
             FMemory::Free(OutputChannels[1]);
             FMemory::Free(BuffBgr);
+            this->RemoveFromRoot();
+            this->ConditionalBeginDestroy();
+            this->BeginDestroy();
         }
         else
         {
@@ -743,8 +740,8 @@ void UCaptureSubsystemDirector::Encode_Audio_Frame(const FAudioData& AudioData)
 uint8 UCaptureSubsystemDirector::LinearToSrgb8(float Linear)
 {
     float Srgb = (Linear <= 0.0031308f)
-                            ? Linear * 12.92f
-                            : 1.055f * FMath::Pow(Linear, 1.0f / 2.4f) - 0.055f;
+        ? Linear * 12.92f
+        : 1.055f * FMath::Pow(Linear, 1.0f / 2.4f) - 0.055f;
     return (uint8)FMath::Clamp(int32(Srgb * 255.0f + 0.5f), 0, 255);
 }
 
@@ -990,11 +987,18 @@ uint32 UCaptureSubsystemDirector::FormatSize_X(uint32 x)
 
 void UCaptureSubsystemDirector::Encode_Finish()
 {
+    if (!IsEncoding)
+    {
+        return;
+    }
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Finishing Encoding "));
     if (OutFormatContext)
     {
         av_write_trailer(OutFormatContext);
-        avio_close(OutFormatContext->pb);
+        if (OutFormatContext->pb)
+        {
+            avio_close(OutFormatContext->pb);
+        }
         avformat_free_context(OutFormatContext);
     }
 
@@ -1026,6 +1030,7 @@ void UCaptureSubsystemDirector::Encode_Finish()
 
 
     av_frame_free(&AudioFrame);
+    IsEncoding = false;
     OnEncodeFinish.Broadcast(Options.OutFileName);
 }
 

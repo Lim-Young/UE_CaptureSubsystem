@@ -6,7 +6,7 @@
 #include "VideoCaptureSubsystem.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnError, FString, ErrorText);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFinishCapture,FString,ExportPath);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFinishCapture, FString, ExportPath);
 class UCaptureSubsystemDirector;
 /**
  *
@@ -89,8 +89,6 @@ public:
 private:
 
     bool bIsUsingRenderTarget = false;
-    void OnEncodeFinish(FString ExportPath)
-    {
-        OnFinishCapture.Broadcast(ExportPath);
-    }
+    FString VideoFileName;
+    void OnEncodeFinish(FString ExportPath);
 };

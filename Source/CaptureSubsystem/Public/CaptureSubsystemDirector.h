@@ -39,7 +39,7 @@ extern "C"
 class FEncoderThread;
 class UVideoCaptureSubsystem;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEncodeFinish,FString,ExportPath);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEncodeFinish, FString, ExportPath);
 DECLARE_MULTICAST_DELEGATE_SixParams(FOnNewSubmixBufferDelegate,
     const USoundSubmix* /*OwningSubmix*/,
     float* /*AudioData*/,
@@ -94,7 +94,7 @@ public:
     void SetRenderTargetSource(UTextureRenderTarget2D* InRenderTarget);
 
     void DestroyDirector();
-
+    UPROPERTY(BlueprintAssignable)
     FOnEncodeFinish OnEncodeFinish;
 
 private:
@@ -118,6 +118,7 @@ private:
 
 private:
     bool IsDestroy = false;
+    bool IsEncoding = false;
     FString FilterDescription;
 
     FVideoCaptureOptions Options;
