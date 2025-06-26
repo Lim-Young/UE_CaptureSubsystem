@@ -30,9 +30,7 @@ void UVideoCaptureSubsystem::OnDirectorFinishCapture(FString ExportPath)
 void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTextureRenderTarget2D* InRenderTarget)
 {
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Capturing Video"));
-    GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
-    GEngine->GetGameUserSettings()->ApplySettings(false);
-    if(Director)
+    if (Director)
     {
         UE_LOG(LogCaptureSubsystem, Warning, TEXT("Already capturing video, please end the current capture first."));
         OnError.Broadcast(TEXT("Already capturing video, please end or waitting the current capture first."));
@@ -60,10 +58,11 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
     }
     else
     {
+        // GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
+        // GEngine->GetGameUserSettings()->ApplySettings(false);
         bIsUsingRenderTarget = false;
     }
     Director->Initialize_Director(GetWorld(), Options, this);
-    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnDirectorFinishCapture);
 }
 
 void UVideoCaptureSubsystem::EndCapture()

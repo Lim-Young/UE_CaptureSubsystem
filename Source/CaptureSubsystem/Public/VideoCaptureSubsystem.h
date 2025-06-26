@@ -73,6 +73,7 @@ public:
 	static FString GetRecommendedPhotoFileName() ;
 	//call back to read screenshot data
 	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer);
+    void OnDirectorFinishCapture(FString ExportPath);
 	UPROPERTY(BlueprintAssignable)
     FOnError OnError;
 
@@ -90,5 +91,5 @@ private:
 
     bool bIsUsingRenderTarget = false;
     FString VideoFileName;
-    void OnDirectorFinishCapture(FString ExportPath);
+
 };

@@ -97,11 +97,11 @@ void UCaptureSubsystemDirector::EndWindowReader_StandardGame(void* i)
 
 void UCaptureSubsystemDirector::ForceEndWindowReader_StandardGame(void* i)
 {
-    Encode_Finish();
     DestroyDirector();
     this->RemoveFromRoot();
     this->ConditionalBeginDestroy();
     this->BeginDestroy();
+    Encode_Finish();
 }
 
 void UCaptureSubsystemDirector::Begin_Receive_AudioData(UWorld* World)
@@ -252,7 +252,7 @@ void UCaptureSubsystemDirector::OnBackBufferReady_RenderThread(SWindow& SlateWin
             GameTexture = CustomRenderTarget->GetResource()->GetTextureRHI();
         }
         // Check if the Slate window matches the game window
-        else if (GameWindow == &SlateWindow)
+        else // if (GameWindow == &SlateWindow)
         {
             // Get the viewport client and the texture to capture
             auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTextureRHI();
@@ -377,21 +377,10 @@ void UCaptureSubsystemDirector::GetScreenVideoData()
     // Lock the game texture and get the texture data
     TextureData = static_cast<uint8*>(RHICmdList.LockTexture2D(GameTexture->GetTexture2D(), 0, EResourceLockMode::RLM_ReadOnly, TextureStride, false));
 
-    if (CustomRenderTarget && CustomRenderTarget->GetResource())
+    if (Runnable && !IsDestroy)
     {
-        if (Runnable)
-        {
-            // Insert the video frame data into the video queue of the encoding thread
-            Runnable->InsertVideo(TextureData, FrameDeltaTime);
-        }
-    }
-    else
-    {
-        if (Runnable && !IsDestroy)
-        {
-            // Insert the video frame data into the video queue of the encoding thread
-            Runnable->InsertVideo(TextureData, FrameDeltaTime);
-        }
+        // Insert the video frame data into the video queue of the encoding thread
+        Runnable->InsertVideo(TextureData, FrameDeltaTime);
     }
 
     // Unlock the game texture
@@ -579,7 +568,7 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
         LogErrorUE("avcodec_parameters_from_context error", Err, false);
     }
 
-
+    // OutVideoStream->time_base = AVRational{1, Options.FPS};
 
     // Open the output file
     const int Return = avio_open(&OutFormatContext->pb, out_file_name, AVIO_FLAG_WRITE);
@@ -1000,7 +989,6 @@ uint32 UCaptureSubsystemDirector::FormatSize_X(uint32 x)
 
 void UCaptureSubsystemDirector::Encode_Finish()
 {
-    OnEncodeFinish.Broadcast(Options.OutFileName);
     if (!IsEncoding)
     {
         return;
@@ -1045,6 +1033,7 @@ void UCaptureSubsystemDirector::Encode_Finish()
 
     av_frame_free(&AudioFrame);
     IsEncoding = false;
+    this->Subsystem->OnDirectorFinishCapture(Options.OutFileName);
 }
 
 void UCaptureSubsystemDirector::LogErrorUE(FString ErrorMessage, int ErrorNum, bool bFatal)
