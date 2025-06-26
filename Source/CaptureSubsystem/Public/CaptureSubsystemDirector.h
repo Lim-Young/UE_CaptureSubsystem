@@ -39,6 +39,7 @@ extern "C"
 class FEncoderThread;
 class UVideoCaptureSubsystem;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEncodeFinish,FString,ExportPath);
 DECLARE_MULTICAST_DELEGATE_SixParams(FOnNewSubmixBufferDelegate,
     const USoundSubmix* /*OwningSubmix*/,
     float* /*AudioData*/,
@@ -93,6 +94,8 @@ public:
     void SetRenderTargetSource(UTextureRenderTarget2D* InRenderTarget);
 
     void DestroyDirector();
+
+    FOnEncodeFinish OnEncodeFinish;
 
 private:
     void Create_Video_Encoder(bool UseGPU, const char* out_file_name, int bit_rate);

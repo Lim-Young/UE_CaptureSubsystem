@@ -5,7 +5,8 @@
 #include "CoreMinimal.h"
 #include "VideoCaptureSubsystem.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnError,FString,ErrorText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnError, FString, ErrorText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFinishCapture,FString,ExportPath);
 class UCaptureSubsystemDirector;
 /**
  *
@@ -73,7 +74,10 @@ public:
 	//call back to read screenshot data
 	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer);
 	UPROPERTY(BlueprintAssignable)
-	FOnError OnError;
+    FOnError OnError;
+
+    UPROPERTY(BlueprintAssignable)
+    FOnFinishCapture OnFinishCapture;
 
 	FSlateApplication* SlateApplication;
 
@@ -81,5 +85,12 @@ public:
 	FString ScreenShotPath;
 	FIntRect CaptureRect;
 	FVector2D AspectRatio;
-	TArray<FColor> Colors;
+    TArray<FColor> Colors;
+private:
+
+    bool bIsUsingRenderTarget = false;
+    void OnEncodeFinish(FString ExportPath)
+    {
+        OnFinishCapture.Broadcast(ExportPath);
+    }
 };

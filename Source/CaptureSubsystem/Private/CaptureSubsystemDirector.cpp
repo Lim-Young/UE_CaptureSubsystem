@@ -1026,6 +1026,7 @@ void UCaptureSubsystemDirector::Encode_Finish()
 
 
     av_frame_free(&AudioFrame);
+    OnEncodeFinish.Broadcast(Options.OutFileName);
 }
 
 void UCaptureSubsystemDirector::LogErrorUE(FString ErrorMessage, int ErrorNum, bool bFatal)

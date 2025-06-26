@@ -8,7 +8,7 @@
 #include "Containers/RingBuffer.h"
 
 /**
- * 
+ *
  */
 
 struct FVideoData
@@ -49,17 +49,17 @@ class UCircleQueue;
 DECLARE_DELEGATE_OneParam(FVideoEncodeDelegate, const FVideoData& )
 DECLARE_DELEGATE_OneParam(FAudioEncodeDelegate, const FAudioData& )
 
-class CAPTURESUBSYSTEM_API FEncoderThread :public FRunnable 
+class CAPTURESUBSYSTEM_API FEncoderThread :public FRunnable
 {
 public:
 
 	FEncoderThread();
 	~FEncoderThread();
-	virtual bool Init() override; 
-	virtual uint32 Run() override; 
-	virtual void Stop() override;  
-	virtual void Exit() override; 
-	
+	virtual bool Init() override;
+	virtual uint32 Run() override;
+	virtual void Stop() override;
+	virtual void Exit() override;
+
 	void CreateVideoQueue();
 	void CreateAudioQueue();
 	bool IsAudioThreadInitialized() const;
@@ -75,8 +75,8 @@ public:
 	bool bExit = false;
 	FVideoEncodeDelegate VideoEncodeDelegate;
 	FAudioEncodeDelegate AudioEncodeDelegate;
-	
-	
+
+
 	bool IsFinished() const;
 private:
 	void RunEncode();
@@ -88,6 +88,6 @@ private:
 private:
 	TUniquePtr< TCircularQueue<FAudioData> >AudioDataQueue;
 	TUniquePtr< TCircularQueue<FVideoData> >VideoDataQueue;
-	
+
 
 };
