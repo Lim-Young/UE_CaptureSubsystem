@@ -21,7 +21,7 @@ void UVideoCaptureSubsystem::Deinitialize()
     ForceEndCapture();
 }
 
-void UVideoCaptureSubsystem::OnFinishCapture(FString ExportPath)
+void UVideoCaptureSubsystem::OnDirectorFinishCapture(FString ExportPath)
 {
     OnFinishCapture.Broadcast(ExportPath);
     Director = nullptr; // Clear the director reference after finishing encoding
@@ -39,7 +39,7 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
         return;
     }
     Director = NewObject<UCaptureSubsystemDirector>(this);
-    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnFinishCapture);
+    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnDirectorFinishCapture);
     if (Options.OutFileName.IsEmpty())
     {
         Options.OutFileName = GetRecommendedVideoFileName();

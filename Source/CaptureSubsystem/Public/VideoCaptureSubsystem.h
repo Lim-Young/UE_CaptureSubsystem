@@ -90,5 +90,5 @@ private:
 
     bool bIsUsingRenderTarget = false;
     FString VideoFileName;
-    void OnEncodeFinish(FString ExportPath);
+    void OnDirectorFinishCapture(FString ExportPath);
 };
