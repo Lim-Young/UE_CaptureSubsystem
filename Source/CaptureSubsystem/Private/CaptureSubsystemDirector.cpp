@@ -377,10 +377,21 @@ void UCaptureSubsystemDirector::GetScreenVideoData()
     // Lock the game texture and get the texture data
     TextureData = static_cast<uint8*>(RHICmdList.LockTexture2D(GameTexture->GetTexture2D(), 0, EResourceLockMode::RLM_ReadOnly, TextureStride, false));
 
-    if (Runnable && !IsDestroy)
+    if (CustomRenderTarget && CustomRenderTarget->GetResource())
     {
-        // Insert the video frame data into the video queue of the encoding thread
-        Runnable->InsertVideo(TextureData, FrameDeltaTime);
+        if (Runnable)
+        {
+            // Insert the video frame data into the video queue of the encoding thread
+            Runnable->InsertVideo(TextureData, FrameDeltaTime);
+        }
+    }
+    else
+    {
+        if (Runnable && !IsDestroy)
+        {
+            // Insert the video frame data into the video queue of the encoding thread
+            Runnable->InsertVideo(TextureData, FrameDeltaTime);
+        }
     }
 
     // Unlock the game texture
@@ -727,11 +738,13 @@ void UCaptureSubsystemDirector::Encode_Audio_Frame(const FAudioData& AudioData)
         AVPacket->stream_index = AudioIndex;
 
         // Write the audio packet to the output format context
-        if (const int Err = av_write_frame(OutFormatContext, AVPacket); Err < 0)
+        if (OutFormatContext)
         {
-            LogErrorUE("av_write_frame audio thread ", Err, false);
+            if (const int Err = av_write_frame(OutFormatContext, AVPacket); Err < 0)
+            {
+                LogErrorUE("av_write_frame audio thread ", Err, false);
+            }
         }
-
         // Unreference and free the audio packet
         av_packet_unref(AVPacket);
     }
@@ -987,6 +1000,7 @@ uint32 UCaptureSubsystemDirector::FormatSize_X(uint32 x)
 
 void UCaptureSubsystemDirector::Encode_Finish()
 {
+    OnEncodeFinish.Broadcast(Options.OutFileName);
     if (!IsEncoding)
     {
         return;
@@ -1031,7 +1045,6 @@ void UCaptureSubsystemDirector::Encode_Finish()
 
     av_frame_free(&AudioFrame);
     IsEncoding = false;
-    OnEncodeFinish.Broadcast(Options.OutFileName);
 }
 
 void UCaptureSubsystemDirector::LogErrorUE(FString ErrorMessage, int ErrorNum, bool bFatal)

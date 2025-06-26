@@ -39,7 +39,6 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
         return;
     }
     Director = NewObject<UCaptureSubsystemDirector>(this);
-    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnDirectorFinishCapture);
     if (Options.OutFileName.IsEmpty())
     {
         Options.OutFileName = GetRecommendedVideoFileName();
@@ -64,6 +63,7 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
         bIsUsingRenderTarget = false;
     }
     Director->Initialize_Director(GetWorld(), Options, this);
+    Director->OnEncodeFinish.AddDynamic(this, &UVideoCaptureSubsystem::OnDirectorFinishCapture);
 }
 
 void UVideoCaptureSubsystem::EndCapture()
