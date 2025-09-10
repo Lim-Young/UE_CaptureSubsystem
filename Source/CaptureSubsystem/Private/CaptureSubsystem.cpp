@@ -14,7 +14,7 @@ void FCaptureSubsystemModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
 
-	
+
 	AVUtilLibrary = LoadLibrary(TEXT("avutil"), TEXT("57"));
 	SWResampleLibrary = LoadLibrary(TEXT("swresample"), TEXT("4"));
 	AVCodecLibrary = LoadLibrary(TEXT("avcodec"), TEXT("59"));
@@ -76,5 +76,5 @@ void* FCaptureSubsystemModule::LoadLibrary(const FString& name, const FString& v
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FCaptureSubsystemModule, CaptureSubsystem)

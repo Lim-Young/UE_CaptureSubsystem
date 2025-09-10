@@ -85,7 +85,7 @@ void UVideoCaptureSubsystem::EndCapture()
             Director->EndWindowReader(false);
         }
 #endif
-        // Director = nullptr;
+        Director = nullptr;
     }
     else
     {
@@ -109,7 +109,6 @@ void UVideoCaptureSubsystem::ForceEndCapture()
             Director->ForceEndWindowReader_StandardGame(nullptr);
         }
 #endif
-        OnFinishCapture.Broadcast(VideoFileName);
         Director = nullptr;
     }
     else
