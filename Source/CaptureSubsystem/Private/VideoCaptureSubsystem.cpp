@@ -50,6 +50,11 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options, UTexture
             FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FolderPath);
         }
     }
+    if(FPaths::GetExtension(Options.OutFileName).IsEmpty())
+    {
+        Options.OutFileName += ".mp4";
+    }
+
     VideoFileName = Options.OutFileName;
     if (InRenderTarget)
     {
