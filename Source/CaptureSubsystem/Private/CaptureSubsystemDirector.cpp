@@ -49,40 +49,77 @@ UCaptureSubsystemDirector::~UCaptureSubsystemDirector()
 
 void UCaptureSubsystemDirector::DestroyDirector()
 {
-    if (!IsDestroy)
+    // 改进：同步停止并等待编码线程退出，解绑事件，再安全释放资源
+    if (IsDestroy)
     {
-        IsDestroy = true;
-        if (!GetWorld() || !SubmixBufferListener.IsValid()
-            || !FAudioDeviceManager::Get())
-            return;
+        return;
+    }
+    IsDestroy = true;
 
+    // 取消注册 SubmixListener（若可用）
+    if (GetWorld() && SubmixBufferListener.IsValid() && FAudioDeviceManager::Get())
+    {
         FAudioDeviceHandle AudioDeviceHandle = GetWorld()->GetAudioDevice();
-        if (!AudioDeviceHandle.IsValid()) {
-            return;
-        }
-
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
-        if (!ConnectedSubmix.IsValid()) {
-            UE_LOG(
-                LogCaptureSubsystem, Error,
-                TEXT("USubmixListener: StopSubmixListener failed, Connected Submix is invalid."));
-            return;
-        }
-        AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.ToSharedRef(), *ConnectedSubmix.Get());
-#else
-        AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.Get());
-#endif
-        UE_LOG(LogCaptureSubsystem, Verbose, TEXT("SubmixListener: UnregisterSubmixBufferListener Called."));
-
-
-        SubmixBufferListener->OnNewSubmixBufferDelegate.Remove(OnNewSubmixBufferDelegateHandle);
-
-        if (Runnable)
+        if (AudioDeviceHandle.IsValid())
         {
-            Runnable->Stop();
-
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+            if (ConnectedSubmix.IsValid())
+            {
+                AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.ToSharedRef(), *ConnectedSubmix.Get());
+            }
+#else
+            AudioDeviceHandle->UnregisterSubmixBufferListener(SubmixBufferListener.Get());
+#endif
+            UE_LOG(LogCaptureSubsystem, Verbose, TEXT("SubmixListener: UnregisterSubmixBufferListener Called."));
         }
     }
+
+    if (SubmixBufferListener.IsValid())
+    {
+        SubmixBufferListener->OnNewSubmixBufferDelegate.Remove(OnNewSubmixBufferDelegateHandle);
+    }
+
+    // 请求 Runnable 停止
+    if (Runnable)
+    {
+        Runnable->Stop();
+    }
+
+    // 等待并删除线程（同步）
+    if (RunnableThread)
+    {
+        // Kill(true) 会等待线程退出
+        RunnableThread->Kill(true);
+        delete RunnableThread;
+        RunnableThread = nullptr;
+    }
+
+    // 删除 runnable 对象
+    if (Runnable)
+    {
+        delete Runnable;
+        Runnable = nullptr;
+    }
+
+    // 解绑渲染回调、编辑器回调和 ticker（安全地）
+    FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().RemoveAll(this);
+#if WITH_EDITOR
+    FEditorDelegates::EndPIE.Remove(EndPIEDelegateHandle);
+#endif
+    FTSTicker::GetCoreTicker().RemoveTicker(TickDelegateHandle);
+
+    // 现在安全地结束编码并释放 FFmpeg 资源
+    Encode_Finish();
+
+    // 释放本地缓冲
+    if (OutputChannels[0]) { FMemory::Free(OutputChannels[0]); OutputChannels[0] = nullptr; }
+    if (OutputChannels[1]) { FMemory::Free(OutputChannels[1]); OutputChannels[1] = nullptr; }
+    if (BuffBgr) { FMemory::Free(BuffBgr); BuffBgr = nullptr; }
+
+    // 标记并销毁 UObject
+    this->RemoveFromRoot();
+    this->ConditionalBeginDestroy();
+    this->BeginDestroy();
 }
 
 void UCaptureSubsystemDirector::EndWindowReader(const bool i)
@@ -98,10 +135,6 @@ void UCaptureSubsystemDirector::EndWindowReader_StandardGame(void* i)
 void UCaptureSubsystemDirector::ForceEndWindowReader_StandardGame(void* i)
 {
     DestroyDirector();
-    this->RemoveFromRoot();
-    this->ConditionalBeginDestroy();
-    this->BeginDestroy();
-    Encode_Finish();
 }
 
 void UCaptureSubsystemDirector::Begin_Receive_AudioData(UWorld* World)
@@ -675,68 +708,128 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
 
 void UCaptureSubsystemDirector::Encode_Audio_Frame(const FAudioData& AudioData)
 {
-    // Retrieve audio data and current audio time from the provided struct
+    // 防护：如果正在销毁或未在编码状态，直接返回
+    if (IsDestroy || !IsEncoding)
+    {
+        return;
+    }
+
+    // 检查关键 FFmpeg / 本地上下文是否存在
+    if (!AudioEncoderCodecContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: AudioEncoderCodecContext is null"));
+        return;
+    }
+    if (!SWRContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: SWRContext is null"));
+        return;
+    }
+    if (!AudioFrame)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: AudioFrame is null"));
+        return;
+    }
+    if (!OutAudioStream)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: OutAudioStream is null"));
+        return;
+    }
+
+    // 准备 AVPacket
+    AVPacket* AVPacket = av_packet_alloc();
+    if (!AVPacket)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: av_packet_alloc failed"));
+        return;
+    }
+
+    // 从输入数据构造指针并检查
     const uint8_t* Data = static_cast<uint8*>(AudioData.Data);
+    if (!Data)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: input audio data is null"));
+        av_packet_free(&AVPacket);
+        return;
+    }
     CurrentAudioTime = AudioData.Time;
 
-    // Allocate an AVPacket for encoding the audio frame
-    AVPacket* AVPacket = av_packet_alloc();
+    // 检查输出缓冲是否分配
+    if (!OutputChannels[0] || !OutputChannels[1])
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Audio_Frame: OutputChannels not allocated"));
+        av_packet_free(&AVPacket);
+        return;
+    }
 
-    // Convert the audio data using the audio resampler context
+    // 进行重采样/格式转换
     const int Count = swr_convert(SWRContext, OutputChannels, 4096, &Data, 1024);
-
     if (Count < 0)
     {
         LogErrorUE("swr convert error", Count, false);
+        av_packet_free(&AVPacket);
+        return;
+    }
+    if (Count == 0)
+    {
+        // 没有样本可用，直接返回
+        av_packet_free(&AVPacket);
+        return;
     }
 
-    // Make the audio frame writable and set the audio frame properties
+    // 确保 frame 可写并填充数据
     if (const int Error = av_frame_make_writable(AudioFrame); Error < 0)
     {
         LogErrorUE("av_frame_make_writable error ", Error, false);
+        av_packet_free(&AVPacket);
+        return;
     }
     AudioFrame->data[0] = OutputChannels[0];
     AudioFrame->data[1] = OutputChannels[1];
     AudioFrame->nb_samples = Count;
 
-    // Set the audio volume of the audio frame
+    // 调整音量
     Set_Audio_Volume(AudioFrame);
 
-    // Send the audio frame to the audio encoder context
+    // 发送到编码器
     if (const auto ErrorNum = avcodec_send_frame(AudioEncoderCodecContext, AudioFrame); ErrorNum < 0)
     {
         LogErrorUE("avcodec_send_frame audio thread", ErrorNum, false);
+        av_packet_free(&AVPacket);
+        return;
     }
 
-    // Receive encoded audio packets from the audio encoder context
+    // 接收并写入所有可用的包
     while (avcodec_receive_packet(AudioEncoderCodecContext, AVPacket) == 0)
     {
-        // Set the packet's presentation and decoding timestamps
-        AVPacket->pts = AVPacket->dts = av_rescale_q(
-            (CurrentAudioTime + Options.AudioDelay) / av_q2d({ 1, 48000 }),
-            { 1, 48000 },
-            OutAudioStream->time_base);
-
-        // Rescale the packet's duration
-        AVPacket->duration = av_rescale_q(
-            AVPacket->duration,
-            { 1, 48000 },
-            OutAudioStream->time_base);
-
-        // Set the packet's stream index
-        AVPacket->stream_index = AudioIndex;
-
-        // Write the audio packet to the output format context
-        if (OutFormatContext)
+        if (OutAudioStream)
         {
-            if (const int Err = av_write_frame(OutFormatContext, AVPacket); Err < 0)
+            AVPacket->pts = AVPacket->dts = av_rescale_q(
+                (CurrentAudioTime + Options.AudioDelay) / av_q2d({ 1, 48000 }),
+                { 1, 48000 },
+                OutAudioStream->time_base);
+
+            AVPacket->duration = av_rescale_q(
+                AVPacket->duration,
+                { 1, 48000 },
+                OutAudioStream->time_base);
+
+            AVPacket->stream_index = AudioIndex;
+
+            if (OutFormatContext)
             {
-                LogErrorUE("av_write_frame audio thread ", Err, false);
+                if (const int Err = av_write_frame(OutFormatContext, AVPacket); Err < 0)
+                {
+                    LogErrorUE("av_write_frame audio thread ", Err, false);
+                }
             }
         }
-        // Unreference and free the audio packet
+
         av_packet_unref(AVPacket);
     }
+
+    // 释放 AVPacket
+    av_packet_free(&AVPacket);
 }
 
 uint8 UCaptureSubsystemDirector::LinearToSrgb8(float Linear)
@@ -749,34 +842,66 @@ uint8 UCaptureSubsystemDirector::LinearToSrgb8(float Linear)
 
 void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
 {
-
-
-    // Update the game clock with the frame delta time
-
-    GameClock += VideoData.FrameDeltaTime;
-
-
-    // Drop this frame until we reach the video frame
-    if (GameClock < VideoClock)
+    // 早期安全检查
+    if (IsDestroy || !IsEncoding)
     {
-        UE_LOG(LogTemp, Log, TEXT("FrameDropped"));
+        return;
+    }
+    if (!VideoEncoderCodecContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: VideoEncoderCodecContext is null"));
+        return;
+    }
+    if (!OutFormatContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: OutFormatContext is null"));
+        return;
+    }
+    if (!OutVideoStream)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: OutVideoStream is null"));
+        return;
+    }
+    if (!SwsContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: SwsContext is null"));
+        return;
+    }
+    if (!GameTexture)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: GameTexture is null"));
         return;
     }
 
+    // 获取纹理数据指针并校验
     uint8* TextureDataPtr = static_cast<uint8*>(VideoData.TextureData);
-    uint8_t* FirstPointer = BuffBgr;
-    AVPacket* VideoPacket = av_packet_alloc();
+    if (!TextureDataPtr)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: TextureData is null"));
+        return;
+    }
 
-    // Calculate crop and difference values based on the capture aspect ratio
+    // 本地缓冲指针校验
+    if (!BuffBgr)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: BuffBgr not allocated"));
+        return;
+    }
+
+    // 使用本地指针，不直接修改成员 BuffBgr（避免在出错时遗留状态）
+    uint8_t* LocalBuf = BuffBgr;
+    size_t LocalBufIndex = 0;
+
+    // 计算裁剪与差值
     const int Crop = Options.OptionalCaptureAspectRatio.IsZero()
         ? GameTexture->GetSizeX()
         : (GameTexture->GetSizeY() * Options.OptionalCaptureAspectRatio.X) / Options.OptionalCaptureAspectRatio.Y;
     const uint32 Difference = GameTexture->GetSizeX() - Crop;
 
-    // Convert the RGB texture data to BGR format
+    // 将 RGB 转为 BGR 填入本地缓冲
     for (uint32 Row = 0; Row < GameTexture->GetSizeY(); ++Row)
     {
-        uint32* PixelPtr = (uint32*)TextureDataPtr;
+        uint32* PixelPtr = reinterpret_cast<uint32*>(TextureDataPtr);
         for (uint32 Col = 0; Col < GameTexture->GetSizeX(); ++Col)
         {
             if (Col >= Difference / 2 && Col <= GameTexture->GetSizeX() - Difference / 2)
@@ -786,45 +911,45 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
                     const uint32 EncodedPixel = *PixelPtr;
                     if (CustomRenderTarget)
                     {
-                        // *(BuffBgr + 2) = LinearToSrgb8(((EncodedPixel >> 16) & 0xFF) / 255.0f);
-                        // *(BuffBgr + 1) = LinearToSrgb8(((EncodedPixel >> 8) & 0xFF) / 255.0f);
-                        // *(BuffBgr) = LinearToSrgb8((EncodedPixel & 0xFF) / 255.0f);
-                        *(BuffBgr + 2) = (EncodedPixel >> 16) & 0xFF;
-                        *(BuffBgr + 1) = (EncodedPixel >> 8) & 0xFF;;
-                        *(BuffBgr) = EncodedPixel & 0xFF;;
+                        LocalBuf[LocalBufIndex + 2] = (EncodedPixel >> 16) & 0xFF;
+                        LocalBuf[LocalBufIndex + 1] = (EncodedPixel >> 8) & 0xFF;
+                        LocalBuf[LocalBufIndex] = EncodedPixel & 0xFF;
                     }
                     else
                     {
-                        *(BuffBgr + 2) = (EncodedPixel >> 2) & 0xFF;
-                        *(BuffBgr + 1) = (EncodedPixel >> 12) & 0xFF;
-                        *(BuffBgr) = (EncodedPixel >> 22) & 0xFF;
+                        LocalBuf[LocalBufIndex + 2] = (EncodedPixel >> 2) & 0xFF;
+                        LocalBuf[LocalBufIndex + 1] = (EncodedPixel >> 12) & 0xFF;
+                        LocalBuf[LocalBufIndex] = (EncodedPixel >> 22) & 0xFF;
                     }
-                    BuffBgr += 3;
+                    LocalBufIndex += 3;
                 }
             }
-
             ++PixelPtr;
         }
-
         TextureDataPtr += TextureStride;
     }
-
-    BuffBgr = FirstPointer;
 
     // Calculate the line size to pass to the YUV conversion function
     const int ShiftStride = Difference != 0 ? 1 : 0;
 
-    // Allocate a video frame
-    auto VideoFrame = av_frame_alloc();
-    if (!VideoFrame)
+    // 分配 AVFrame & AVPacket，并逐步检查返回值
+    AVPacket* VideoPacket = av_packet_alloc();
+    if (!VideoPacket)
     {
-        UE_LOG(LogCaptureSubsystem, Fatal, TEXT("Video frame alloc failed"));
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: av_packet_alloc failed"));
+        return;
     }
 
+    AVFrame* VideoFrame = av_frame_alloc();
+    if (!VideoFrame)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: av_frame_alloc failed"));
+        av_packet_free(&VideoPacket);
+        return;
+    }
 
-
-    // Allocate buffers for the video frame
-    const int Return = av_image_alloc(
+    // 分配图像缓冲并检查
+    const int imgRet = av_image_alloc(
         VideoFrame->data,
         VideoFrame->linesize,
         OutWidth,
@@ -832,50 +957,74 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
         VideoEncoderCodecContext->pix_fmt,
         32
     );
+    if (imgRet < 0)
+    {
+        LogErrorUE("av_image_alloc failed", imgRet, false);
+        av_frame_free(&VideoFrame);
+        av_packet_free(&VideoPacket);
+        return;
+    }
+
+    // 进行色彩/缩放拷贝
     Video_Frame_YUV_From_BGR(VideoFrame, BuffBgr, ShiftStride + (GameTexture->GetSizeX() - Difference / 2) - Difference / 2);
 
+    // 更新时钟并可能产生多个帧
+    GameClock += VideoData.FrameDeltaTime;
+    if (GameClock < VideoClock)
+    {
+        // 无需编码，释放资源
+        av_freep(&VideoFrame->data[0]);
+        av_frame_free(&VideoFrame);
+        av_packet_free(&VideoPacket);
+        return;
+    }
 
-
-    // If the game FPS is less than the video FPS, add duplicate frames
-        //Cancel the first iteration subtraction We want to correct the number only if frames were duplicated
-    TickTime = TickTime + VideoTickTime;
+    TickTime += VideoTickTime; // 保持原有逻辑
     while (VideoClock < GameClock)
     {
-
-        TickTime = TickTime - VideoTickTime;
+        TickTime -= VideoTickTime;
         VideoFrame->pts = VideoFrame->pkt_dts = OutVideoStream->time_base.den * VideoClock;
         VideoFrame->duration = av_rescale_q(1, AVRational{ 1, Options.FPS }, OutVideoStream->time_base);
         VideoClock += 1.f / Options.FPS;
 
-        int ret = 0;
-        avcodec_send_frame(VideoEncoderCodecContext, VideoFrame);
-        while (ret >= 0)
+        // 发送帧到编码器
+        int sendRet = avcodec_send_frame(VideoEncoderCodecContext, VideoFrame);
+        if (sendRet < 0 && sendRet != AVERROR(EAGAIN))
         {
-            ret = avcodec_receive_packet(VideoEncoderCodecContext, VideoPacket);
-
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            {
-
-                break;
-            }
-            if (ret < 0)
-            {
-
-                break;
-            }
-            VideoPacket->stream_index = VideoIndex;
-
-            av_interleaved_write_frame(OutFormatContext, VideoPacket);
+            LogErrorUE("avcodec_send_frame video", sendRet, false);
+            break;
         }
 
+        // 接收所有可用的包并写入
+        int recvRet = 0;
+        while ((recvRet = avcodec_receive_packet(VideoEncoderCodecContext, VideoPacket)) >= 0)
+        {
+            VideoPacket->stream_index = VideoIndex;
 
+            if (OutFormatContext)
+            {
+                const int writeErr = av_interleaved_write_frame(OutFormatContext, VideoPacket);
+                if (writeErr < 0)
+                {
+                    LogErrorUE("av_interleaved_write_frame", writeErr, false);
+                }
+            }
+
+            av_packet_unref(VideoPacket);
+        }
+
+        if (recvRet != AVERROR(EAGAIN) && recvRet != AVERROR_EOF && recvRet < 0)
+        {
+            // 接收发生错误，记录后退出循环
+            LogErrorUE("avcodec_receive_packet video", recvRet, false);
+            break;
+        }
     }
 
-
-    av_freep(VideoFrame->data);
-    av_packet_unref(VideoPacket);
-
-
+    // 清理
+    av_freep(&VideoFrame->data[0]);
+    av_frame_free(&VideoFrame);
+    av_packet_free(&VideoPacket);
 }
 
 void UCaptureSubsystemDirector::Encode_SetCurrentAudioTime(uint8_t* rgb)
@@ -1002,38 +1151,56 @@ void UCaptureSubsystemDirector::Encode_Finish()
             avio_close(OutFormatContext->pb);
         }
         avformat_free_context(OutFormatContext);
+        OutFormatContext = nullptr;
     }
 
 
     if (VideoEncoderCodecContext)
     {
-        avcodec_free_context(&VideoEncoderCodecContext);
         avcodec_close(VideoEncoderCodecContext);
-        av_free(VideoEncoderCodecContext);
+        avcodec_free_context(&VideoEncoderCodecContext);
+        VideoEncoderCodecContext = nullptr;
     }
 
     if (AudioEncoderCodecContext)
     {
-        avcodec_free_context(&AudioEncoderCodecContext);
         avcodec_close(AudioEncoderCodecContext);
-        av_free(AudioEncoderCodecContext);
+        avcodec_free_context(&AudioEncoderCodecContext);
+        AudioEncoderCodecContext = nullptr;
     }
 
     if (SWRContext)
     {
         swr_close(SWRContext);
         swr_free(&SWRContext);
-        sws_freeContext(SwsContext);
+        SWRContext = nullptr;
     }
 
-    avfilter_graph_free(&FilterGraph);
-    avfilter_inout_free(&Inputs);
-    avfilter_inout_free(&Outputs);
+    if (SwsContext)
+    {
+        sws_freeContext(SwsContext);
+        SwsContext = nullptr;
+    }
 
+    if (FilterGraph)
+    {
+        avfilter_graph_free(&FilterGraph);
+        FilterGraph = nullptr;
+    }
+    avfilter_inout_free(&Inputs);
+    Inputs = nullptr;
+    avfilter_inout_free(&Outputs);
+    Outputs = nullptr;
 
     av_frame_free(&AudioFrame);
+    AudioFrame = nullptr;
+
     IsEncoding = false;
-    this->Subsystem->OnDirectorFinishCapture(Options.OutFileName);
+    if (Subsystem)
+    {
+        this->Subsystem->OnDirectorFinishCapture(Options.OutFileName);
+        Subsystem = nullptr;
+    }
 }
 
 void UCaptureSubsystemDirector::LogErrorUE(FString ErrorMessage, int ErrorNum, bool bFatal)
@@ -1061,34 +1228,61 @@ void UCaptureSubsystemDirector::LogErrorUE(FString ErrorMessage, int ErrorNum, b
 bool UCaptureSubsystemDirector::CheckForRemainingFrames() const
 {
 
-    avcodec_send_frame(VideoEncoderCodecContext, nullptr);
+    // 防护：如果没有有效的编码上下文或输出上下文，直接返回 false 表示没有剩余帧可写
+    if (!VideoEncoderCodecContext || !OutFormatContext)
+    {
+        return false;
+    }
 
-
+    // 尝试向编码器发送空帧以触发刷新
+    int send_ret = avcodec_send_frame(VideoEncoderCodecContext, nullptr);
+    if (send_ret < 0 && send_ret != AVERROR_EOF)
+    {
+        return false;
+    }
 
     AVPacket* VideoPacket = av_packet_alloc();
+    if (!VideoPacket)
+    {
+        return false;
+    }
 
     int ret = 0;
-    while (ret >= 0)
+    while (true)
     {
         ret = avcodec_receive_packet(VideoEncoderCodecContext, VideoPacket);
 
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        if (ret == AVERROR(EAGAIN))
         {
+            // 编码器当前没有更多包
+            break;
+        }
+        if (ret == AVERROR_EOF)
+        {
+            // 已刷新完毕
             av_packet_unref(VideoPacket);
             break;
         }
         if (ret < 0)
         {
+            // 出现其它错误，安全退出
             av_packet_unref(VideoPacket);
             break;
         }
+
+        // 成功接收到包，写出
         VideoPacket->stream_index = VideoIndex;
-        av_interleaved_write_frame(OutFormatContext, VideoPacket);
-
+        if (OutFormatContext)
+        {
+            av_interleaved_write_frame(OutFormatContext, VideoPacket);
+        }
+        av_packet_unref(VideoPacket);
     }
-    av_packet_unref(VideoPacket);
 
-    return  false;
+    av_packet_free(&VideoPacket);
+
+    // 处理完成后返回 false 表示没有剩余帧（与原逻辑一致）
+    return false;
 }
 
 void UCaptureSubsystemDirector::SetupEncoderContext(const AVCodec* Codec, int BitRate)
