@@ -737,7 +737,22 @@ void UCaptureSubsystemDirector::OnNewSubmixBuffer(const USoundSubmix* OwningSubm
     AudioClock = AudioClock - InitialAudioTime;
 
     // Insert the audio data into the audio queue
-    Runnable->InsertAudio(AudioData, AudioClock);
+    // Copy audio data into heap memory to avoid passing a transient pointer across threads
+    if (Runnable)
+    {
+        const int32 TotalSamples = NumSamples * NumChannels;
+        const SIZE_T Bytes = static_cast<SIZE_T>(TotalSamples) * sizeof(float);
+        float* CopiedAudio = static_cast<float*>(FMemory::Malloc(Bytes));
+        if (CopiedAudio)
+        {
+            FMemory::Memcpy(CopiedAudio, AudioData, Bytes);
+            Runnable->InsertAudio(CopiedAudio, AudioClock);
+        }
+        else
+        {
+            UE_LOG(LogCaptureSubsystem, Error, TEXT("OnNewSubmixBuffer: failed to malloc audio copy"));
+        }
+    }
 }
 
 void UCaptureSubsystemDirector::Encode_Audio_Frame(const FAudioData& AudioData)
@@ -965,12 +980,9 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
         TextureDataPtr += TextureStride;
     }
 
-    // 释放从渲染线程拷贝来的纹理内存（避免泄露）
-    if (OrigTextureDataPtr)
-    {
-        FMemory::Free(OrigTextureDataPtr);
-        TextureDataPtr = nullptr;
-    }
+    // 注意：OrigTextureDataPtr 的释放责任已转移给编码线程（FEncoderThread::EncodeVideo），
+    // 因此在此处不再释放以避免 double-free。
+    // OrigTextureDataPtr 将在编码线程消费后释放。
 
     // Calculate the line size to pass to the YUV conversion function
     const int ShiftStride = Difference != 0 ? 1 : 0;
