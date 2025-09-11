@@ -21,6 +21,12 @@ FEncoderThread::~FEncoderThread()
 
 bool FEncoderThread::Init()
 {
+	UE_LOG(LogCaptureSubsystem, Log, TEXT("FEncoderThread::Init called on thread"));
+	if (ThreadInitDelegate.IsBound())
+	{
+		UE_LOG(LogCaptureSubsystem, Log, TEXT("FEncoderThread::Init executing ThreadInitDelegate"));
+		ThreadInitDelegate.Execute();
+	}
 	return true;
 }
 

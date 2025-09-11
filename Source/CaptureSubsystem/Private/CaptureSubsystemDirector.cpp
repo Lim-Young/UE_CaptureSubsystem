@@ -436,11 +436,12 @@ void UCaptureSubsystemDirector::GetScreenVideoData()
 void UCaptureSubsystemDirector::CreateEncodeThread()
 {
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Creating Encoder Thread"));
-
-    // Create the video encoder
-    Create_Video_Encoder(Options.UseGPU, TCHAR_TO_ANSI(*Options.OutFileName), Options.VideoBitRate);
-
     Runnable = new FEncoderThread();
+    // Bind encoder initialization to run in the encoder thread context
+    Runnable->ThreadInitDelegate.BindUObject(this, &UCaptureSubsystemDirector::InitEncoderOnThread);
+
+    // The actual encoder (FFmpeg hwdevice/codec) will be created inside the encoder thread Init()
+
     Runnable->CreateVideoQueue();
 
     // Reallocate the BuffBgr memory block to match the game texture size
@@ -449,8 +450,15 @@ void UCaptureSubsystemDirector::CreateEncodeThread()
     // Bind the Encode_Video_Frame function to the VideoEncodeDelegate of the encoding thread
     Runnable->VideoEncodeDelegate.BindUObject(this, &UCaptureSubsystemDirector::Encode_Video_Frame);
 
-    // Create the encoding thread
+    // Create the encoding thread (it will call Runnable->Init() where ThreadInitDelegate runs)
     RunnableThread = FRunnableThread::Create(Runnable, TEXT("EncoderThread"));
+}
+
+void UCaptureSubsystemDirector::InitEncoderOnThread()
+{
+    UE_LOG(LogCaptureSubsystem, Log, TEXT("InitEncoderOnThread: creating video encoder on encoder thread"));
+    // Create the video encoder in the encoder thread context to avoid cross-thread FFmpeg issues
+    Create_Video_Encoder(Options.UseGPU, TCHAR_TO_ANSI(*Options.OutFileName), Options.VideoBitRate);
 }
 
 
@@ -599,6 +607,69 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
         // av_opt_set_int(VideoEncoderCodecContext->priv_data, "gpu", 0, 0);
     }
 
+    // Try to create HW device and bind it to codec context for vendor-specific acceleration
+    AVBufferRef* HwDeviceCtx = nullptr;
+    int HwErr = 0;
+    if (UseGPU && EncoderCodec)
+    {
+        // Prefer explicit hwdevice types per vendor
+        if (IsRHIDeviceNVIDIA())
+        {
+            // Try CUDA hwdevice
+            HwErr = av_hwdevice_ctx_create(&HwDeviceCtx, av_hwdevice_find_type_by_name("cuda"), nullptr, nullptr, 0);
+            if (HwErr < 0)
+            {
+                char ErrBuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+                av_strerror(HwErr, ErrBuf, sizeof(ErrBuf));
+                UE_LOG(LogCaptureSubsystem, Warning, TEXT("av_hwdevice_ctx_create(cuda) failed: %s"), ANSI_TO_TCHAR(ErrBuf));
+            }
+            else
+            {
+                UE_LOG(LogCaptureSubsystem, Log, TEXT("Created CUDA hwdevice"));
+            }
+        }
+        else if (IsRHIDeviceIntel())
+        {
+            // Try QSV (Intel Quick Sync)
+            HwErr = av_hwdevice_ctx_create(&HwDeviceCtx, av_hwdevice_find_type_by_name("qsv"), nullptr, nullptr, 0);
+            if (HwErr < 0)
+            {
+                char ErrBuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+                av_strerror(HwErr, ErrBuf, sizeof(ErrBuf));
+                UE_LOG(LogCaptureSubsystem, Warning, TEXT("av_hwdevice_ctx_create(qsv) failed: %s"), ANSI_TO_TCHAR(ErrBuf));
+            }
+            else
+            {
+                UE_LOG(LogCaptureSubsystem, Log, TEXT("Created QSV hwdevice"));
+            }
+        }
+        else if (IsRHIDeviceAMD())
+        {
+            // Try D3D11VA or amf where supported
+            // FFmpeg may expose "d3d11va" or "dxva2" hwdevice types depending on build; try d3d11va first
+            HwErr = av_hwdevice_ctx_create(&HwDeviceCtx, av_hwdevice_find_type_by_name("d3d11va"), nullptr, nullptr, 0);
+            if (HwErr < 0)
+            {
+                char ErrBuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+                av_strerror(HwErr, ErrBuf, sizeof(ErrBuf));
+                UE_LOG(LogCaptureSubsystem, Warning, TEXT("av_hwdevice_ctx_create(d3d11va) failed: %s"), ANSI_TO_TCHAR(ErrBuf));
+                // try amf via d3d11 interop may not be directly available; leave HwDeviceCtx null to fallback
+            }
+            else
+            {
+                UE_LOG(LogCaptureSubsystem, Log, TEXT("Created D3D11VA hwdevice"));
+            }
+        }
+
+        // If hwdevice created, attach to codec context
+        if (HwDeviceCtx)
+        {
+            // attach
+            VideoEncoderCodecContext->hw_device_ctx = av_buffer_ref(HwDeviceCtx);
+            av_buffer_unref(&HwDeviceCtx);
+        }
+    }
+
     // Set the global header flag if supported by the output format
     if (OutFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
     {
@@ -615,6 +686,13 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
             EncoderCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
             UE_LOG(LogCaptureSubsystem, Warning, TEXT("Using software encoder"));
             SetupEncoderContext(EncoderCodec, bit_rate);
+
+            // If hw_device_ctx was set earlier, free it because software codec shouldn't use it
+            if (VideoEncoderCodecContext->hw_device_ctx)
+            {
+                av_buffer_unref(&VideoEncoderCodecContext->hw_device_ctx);
+                VideoEncoderCodecContext->hw_device_ctx = nullptr;
+            }
 
             Err = avcodec_open2(VideoEncoderCodecContext, EncoderCodec, nullptr);
             if (Err < 0)
