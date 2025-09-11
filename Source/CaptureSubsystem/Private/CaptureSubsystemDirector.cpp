@@ -17,6 +17,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 
 
+
 UCaptureSubsystemDirector::UCaptureSubsystemDirector() :
     Outputs(nullptr),
     Inputs(nullptr),
@@ -512,6 +513,11 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
 {
     UE_LOG(LogCaptureSubsystem, Log, TEXT("Creating Video encoder"));
 
+    if (!OutFormatContext)
+    {
+        UE_LOG(LogCaptureSubsystem, Error, TEXT("Create_Video_Encoder: OutFormatContext is null"));
+        return;
+    }
     const AVCodec* EncoderCodec = nullptr;
 
     if (UseGPU)
@@ -562,7 +568,7 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
     if (EncoderCodec)
     {
         av_opt_set(VideoEncoderCodecContext->priv_data, "preset", "fast", 0);
-        av_opt_set_int(VideoEncoderCodecContext->priv_data, "gpu", 0, 0);
+        // av_opt_set_int(VideoEncoderCodecContext->priv_data, "gpu", 0, 0);
     }
 
     // Set the global header flag if supported by the output format
