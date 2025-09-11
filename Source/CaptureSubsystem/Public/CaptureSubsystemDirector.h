@@ -107,6 +107,8 @@ private:
     void AddTickFunction();
     void AddEndFunction();
     void CreateEncodeThread();
+    // Initialize encoder on the encoder thread (called in FEncoderThread::Init)
+    void InitEncoderOnThread();
     void Set_Audio_Volume(AVFrame* frame) const;
 
     void Alloc_Video_Filter();

@@ -48,6 +48,7 @@ class UCircleQueue;
 
 DECLARE_DELEGATE_OneParam(FVideoEncodeDelegate, const FVideoData& )
 DECLARE_DELEGATE_OneParam(FAudioEncodeDelegate, const FAudioData& )
+DECLARE_DELEGATE(FThreadInitDelegate)
 
 class CAPTURESUBSYSTEM_API FEncoderThread :public FRunnable
 {
@@ -75,6 +76,9 @@ public:
 	bool bExit = false;
 	FVideoEncodeDelegate VideoEncodeDelegate;
 	FAudioEncodeDelegate AudioEncodeDelegate;
+
+	// Called in the encoder thread context during Init()
+	FThreadInitDelegate ThreadInitDelegate;
 
 
 	bool IsFinished() const;
