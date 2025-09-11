@@ -52,7 +52,7 @@ void FEncoderThread::CreateAudioQueue()
 {
 	UE_LOG(LogCaptureSubsystem,Log,TEXT("Creating Audio Queue"))
 	AudioDataQueue=MakeUnique<TCircularQueue<FAudioData>>(60 );
-	
+
 }
 
 bool FEncoderThread::IsAudioThreadInitialized() const
@@ -76,10 +76,10 @@ void FEncoderThread::InsertVideo(void* TextureData, float DeltaTime)
 		return ;
 	}
 
-	
+
 		FScopeLock ScopeLock(&VideoBufferMutex);
 		VideoDataQueue->Enqueue(FVideoData(DeltaTime,TextureData));
-	
+
 
 }
 
@@ -118,28 +118,40 @@ void FEncoderThread::RunEncode()
 void FEncoderThread::EncodeVideo() const
 {
 	FVideoData Data;
-	
+
 	if(VideoDataQueue->Dequeue(Data))
 	{
 		VideoEncodeDelegate.ExecuteIfBound(Data);
+		// 消费端语义：编码线程负责释放由渲染线程分配的纹理缓冲
+		if (Data.TextureData)
+		{
+			FMemory::Free(Data.TextureData);
+			Data.TextureData = nullptr;
+		}
 	}
 
 }
 
 void FEncoderThread::EncodeAudio() const
 {
-
-	FAudioData Data;
-	if(!AudioDataQueue)
+	if (!AudioDataQueue)
 	{
 		return;
 	}
-	if(AudioDataQueue->Dequeue(Data))
+
+	FAudioData Data;
+	if (AudioDataQueue->Dequeue(Data))
 	{
+		// 调用消费回调
 		AudioEncodeDelegate.ExecuteIfBound(Data);
+
+		// 释放复制的音频缓冲（生产端在 OnNewSubmixBuffer 中分配）
+		if (Data.Data)
+		{
+			FMemory::Free(Data.Data);
+			Data.Data = nullptr;
+		}
 	}
-	
-	
 }
 
 bool FEncoderThread::IsFinished() const
