@@ -406,17 +406,29 @@ void UCaptureSubsystemDirector::GetScreenVideoData()
 
     SCOPED_DRAW_EVENT(RHICmdList, CaptureEvent);
 
-
-
-    // Lock the game texture and get the texture data
-    TextureData = static_cast<uint8*>(RHICmdList.LockTexture2D(GameTexture->GetTexture2D(), 0, EResourceLockMode::RLM_ReadOnly, TextureStride, false));
-
-    if (Runnable && !IsDestroy)
+    uint8* LockedPtr = static_cast<uint8*>(RHICmdList.LockTexture2D(GameTexture->GetTexture2D(), 0, EResourceLockMode::RLM_ReadOnly, TextureStride, false));
+    if (LockedPtr)
     {
-        // Insert the video frame data into the video queue of the encoding thread
-        Runnable->InsertVideo(TextureData, FrameDeltaTime);
-    }
+        const int32 Height = GameTexture->GetSizeY();
+        const uint32 RowBytes = TextureStride;
+        const int64 CopySize = int64(RowBytes) * int64(Height);
 
+        // 如果有编码线程，拷贝出一份堆内存并传给编码线程，避免 Unlock 后悬指针
+        if (Runnable && !IsDestroy)
+        {
+            uint8* CopiedData = static_cast<uint8*>(FMemory::Malloc(static_cast<SIZE_T>(CopySize)));
+            if (CopiedData)
+            {
+                FMemory::Memcpy(CopiedData, LockedPtr, static_cast<SIZE_T>(CopySize));
+                Runnable->InsertVideo(CopiedData, FrameDeltaTime);
+            }
+            else
+            {
+                UE_LOG(LogCaptureSubsystem, Error, TEXT("GetScreenVideoData: failed to malloc copy buffer"));
+            }
+        }
+        // 如果没有 Runnable，则不需要保留数据，什么都不做
+    }
     // Unlock the game texture
     RHICmdList.UnlockTexture2D(GameTexture, 0, false);
 }
@@ -902,6 +914,8 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
         UE_LOG(LogCaptureSubsystem, Error, TEXT("Encode_Video_Frame: TextureData is null"));
         return;
     }
+    // 保存原始指针以便在拷贝完成后释放（GetScreenVideoData 中分配的内存）
+    uint8* OrigTextureDataPtr = TextureDataPtr;
 
     // 本地缓冲指针校验
     if (!BuffBgr)
@@ -949,6 +963,13 @@ void UCaptureSubsystemDirector::Encode_Video_Frame(const FVideoData& VideoData)
             ++PixelPtr;
         }
         TextureDataPtr += TextureStride;
+    }
+
+    // 释放从渲染线程拷贝来的纹理内存（避免泄露）
+    if (OrigTextureDataPtr)
+    {
+        FMemory::Free(OrigTextureDataPtr);
+        TextureDataPtr = nullptr;
     }
 
     // Calculate the line size to pass to the YUV conversion function
