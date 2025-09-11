@@ -538,6 +538,22 @@ void UCaptureSubsystemDirector::Create_Video_Encoder(bool UseGPU, const char* ou
                 UE_LOG(LogCaptureSubsystem, Log, TEXT("AMF"));
             }
         }
+        else if (IsRHIDeviceIntel())
+        {
+            EncoderCodec = avcodec_find_encoder_by_name("h264_qsv");
+            if (EncoderCodec)
+            {
+                UE_LOG(LogCaptureSubsystem, Log, TEXT("QSV"));
+            }
+        }
+        else if (IsRHIDeviceApple())
+        {
+            EncoderCodec = avcodec_find_encoder_by_name("h264_videotoolbox");
+            if (EncoderCodec)
+            {
+                UE_LOG(LogCaptureSubsystem, Log, TEXT("VideoToolbox"));
+            }
+        }
 
         // If no GPU encoder codec found, fall back to software encoder
         if (!EncoderCodec)
