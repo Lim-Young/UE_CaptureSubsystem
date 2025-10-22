@@ -15,6 +15,11 @@ FEncoderThread::FEncoderThread()
 
 FEncoderThread::~FEncoderThread()
 {
+	// Ensure delegates are unbound to avoid cross-thread access while destroying
+	VideoEncodeDelegate.Unbind();
+	AudioEncodeDelegate.Unbind();
+	ThreadInitDelegate.Unbind();
+
 	VideoDataQueue.Reset();
 	AudioDataQueue.Reset();
 }
