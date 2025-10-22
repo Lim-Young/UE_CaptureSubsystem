@@ -14,6 +14,7 @@
 #include "EncoderThread.h"
 #include "VideoCaptureSubsystem.h"
 #include "Async/Async.h"
+#include "RHICommandList.h"
 #include "Engine/TextureRenderTarget2D.h"
 
 
@@ -80,7 +81,21 @@ void UCaptureSubsystemDirector::DestroyDirector()
         SubmixBufferListener->OnNewSubmixBufferDelegate.Remove(OnNewSubmixBufferDelegateHandle);
     }
 
-    // 请求 Runnable 停止
+    // 解绑渲染回调、编辑器回调和 ticker（先解绑以防这些回调在删除 Runnable 时访问它）
+    if (FSlateApplication::IsInitialized())
+    {
+        if (FSlateApplication::Get().GetRenderer())
+        {
+            FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().RemoveAll(this);
+            FSlateApplication::Get().GetRenderer()->OnSlateWindowDestroyed().RemoveAll(this);
+        }
+    }
+#if WITH_EDITOR
+    FEditorDelegates::EndPIE.Remove(EndPIEDelegateHandle);
+#endif
+    FTSTicker::GetCoreTicker().RemoveTicker(TickDelegateHandle);
+
+    // 请求 Runnable 停止并等待线程退出（先解绑所有外部生产者，确保没有并发访问）
     if (Runnable)
     {
         Runnable->Stop();
@@ -95,19 +110,17 @@ void UCaptureSubsystemDirector::DestroyDirector()
         RunnableThread = nullptr;
     }
 
-    // 删除 runnable 对象
+    // 删除 runnable 对象（此时应不存在其他线程正在访问 Runnable 的委托）
     if (Runnable)
     {
+        // 先解绑 Runnable 内部的委托以降低并发风险
+        Runnable->VideoEncodeDelegate.Unbind();
+        Runnable->AudioEncodeDelegate.Unbind();
+        Runnable->ThreadInitDelegate.Unbind();
+
         delete Runnable;
         Runnable = nullptr;
     }
-
-    // 解绑渲染回调、编辑器回调和 ticker（安全地）
-    FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().RemoveAll(this);
-#if WITH_EDITOR
-    FEditorDelegates::EndPIE.Remove(EndPIEDelegateHandle);
-#endif
-    FTSTicker::GetCoreTicker().RemoveTicker(TickDelegateHandle);
 
     // 现在安全地结束编码并释放 FFmpeg 资源
     Encode_Finish();
