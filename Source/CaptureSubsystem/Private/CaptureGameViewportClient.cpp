@@ -38,7 +38,7 @@ void UCaptureGameViewportClient::CopyViewportToRenderTarget(UTextureRenderTarget
 {
 	MyRenderTarget = RenderTarget;
 	PendingCopyViewportToRenderTarget = true;
-	
+
 }
 
 void UCaptureGameViewportClient::CopyTextureRHI(FRenderTarget* MyViewRenderTarget,
@@ -48,7 +48,7 @@ void UCaptureGameViewportClient::CopyTextureRHI(FRenderTarget* MyViewRenderTarge
 		[MyViewRenderTarget, DestRenderTarget](FRHICommandListImmediate& RHICmdList)
 		{
 			const FTexture2DRHIRef destTexture = DestRenderTarget->GetRenderTargetResource()->GetRenderTargetTexture();
-			 
+
 			RHICmdList.CopyTexture  (MyViewRenderTarget->GetRenderTargetTexture(), destTexture,FRHICopyTextureInfo());
 		});
 	FlushRenderingCommands();

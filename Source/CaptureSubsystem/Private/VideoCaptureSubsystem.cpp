@@ -26,13 +26,13 @@ void UVideoCaptureSubsystem::StartCapture(FVideoCaptureOptions Options)
 	UE_LOG(LogCaptureSubsystem, Log, TEXT("Capturing Video"));
 	GEngine->GetGameUserSettings()->SetFullscreenMode(EWindowMode::WindowedFullscreen);
 	GEngine->GetGameUserSettings()->ApplySettings(false);
-	
+
 	Director = NewObject<UCaptureSubsystemDirector>(this);
 	if (Options.OutFileName.IsEmpty())
 	{
 		Options.OutFileName = GetRecommendedVideoFileName();
 	}
-	//Check if file path is valid if not create the folders 
+	//Check if file path is valid if not create the folders
 	if (!FPaths::FileExists(Options.OutFileName))
 	{
 		const FString FolderPath = FPaths::GetPath(Options.OutFileName);
@@ -112,14 +112,14 @@ bool UVideoCaptureSubsystem::IsRecording() const
 	return Director != nullptr;
 }
 
-FString UVideoCaptureSubsystem::GetRecommendedVideoFileName() 
+FString UVideoCaptureSubsystem::GetRecommendedVideoFileName()
 {
 	const FDateTime Now = FDateTime::Now();
 	return FString(FPlatformProcess::UserDir()) + "Capture/" + Now.ToString() + ".mp4";
 }
 
 
-FString UVideoCaptureSubsystem::GetRecommendedPhotoFileName() 
+FString UVideoCaptureSubsystem::GetRecommendedPhotoFileName()
 {
 	const FDateTime Now = FDateTime::Now();
 	return FString(FPlatformProcess::UserDir()) + "Capture/" + Now.ToString() + ".jpg";
@@ -138,7 +138,7 @@ void UVideoCaptureSubsystem::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 
 	if (const auto Texture = ViewportClient->MyRenderTarget->GetResource()->GetTexture2DRHI())
 	{
-		
+
 		const int Crop = AspectRatio.IsZero()
 			                 ? Texture->GetSizeX()
 			                 : Texture->GetSizeY() * AspectRatio.X / AspectRatio.Y;

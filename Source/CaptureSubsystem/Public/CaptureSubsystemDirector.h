@@ -34,7 +34,7 @@ extern "C"
 #include "CaptureSubsystemDirector.generated.h"
 
 /**
- * 
+ *
  */
 class FEncoderThread;
 class UVideoCaptureSubsystem;
@@ -56,17 +56,17 @@ public:
 	void Encode_SetCurrentAudioTime(uint8_t* rgb);
 	void Encode_Audio_Frame(const FAudioData& AudioData);
 	void Encode_Finish();
-	
+
 	virtual void OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData, int32 NumSamples, int32 NumChannels, const int32 SampleRate, double AudioClock) override;
-	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTexture2DRHIRef& BackBuffer);
+	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer);
 	bool Tick(float DeltaTime);
 
 	void EndWindowReader(const bool i);
 	void EndWindowReader_StandardGame(void* i);
 	void ForceEndWindowReader_StandardGame(void* i);
-	
+
 	void DestroyDirector();
-	
+
 private:
 	void Create_Video_Encoder(bool UseGPU, const char* out_file_name,int bit_rate);
 	void Create_Audio_Encoder(const char* EncoderName);
@@ -78,7 +78,7 @@ private:
 	void AddEndFunction();
 	void CreateEncodeThread();
 	void Set_Audio_Volume(AVFrame *frame) const;
-	
+
 	void Alloc_Video_Filter();
 	static uint32 FormatSize_X(uint32 x);
 
@@ -93,23 +93,23 @@ private:
 	float VideoTickTime;
 	double CurrentAudioTime = 0.0;
 	double InitialAudioTime = -1.0;
-	
+
 
 	uint32 OutWidth;
 	uint32 OutHeight;
 
-	FTexture2DRHIRef GameTexture;
+	FTextureRHIRef GameTexture;
 
-	
+
 	AVFilterInOut *Outputs;
 	AVFilterInOut *Inputs;
 	AVFilterGraph *FilterGraph;
 	AVFilterContext *BufferSinkContext;
 	AVFilterContext *BufferSrcContext;
 	AVFilterContext *FramerateContext;
-	
 
-	
+
+
 	SWindow* GameWindow;
 	TArray<FColor> TexturePixel;
 	float TickTime = 0.0f;
@@ -141,9 +141,9 @@ private:
 	FDelegateHandle EndPIEDelegateHandle;
 
 	AVFrame* AudioFrame;
-	
+
 	UVideoCaptureSubsystem* Subsystem;
-	
+
 	TEnumAsByte<EWorldType::Type> GameMode;
 	float FrameDeltaTime=0.f;
 };

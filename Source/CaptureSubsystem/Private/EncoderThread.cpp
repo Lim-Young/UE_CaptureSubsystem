@@ -52,7 +52,7 @@ void FEncoderThread::CreateAudioQueue()
 {
 	UE_LOG(LogCaptureSubsystem,Log,TEXT("Creating Audio Queue"))
 	AudioDataQueue=MakeUnique<TCircularQueue<FAudioData>>(60 );
-	
+
 }
 
 bool FEncoderThread::IsAudioThreadInitialized() const
@@ -76,10 +76,10 @@ void FEncoderThread::InsertVideo(void* TextureData, float DeltaTime)
 		return ;
 	}
 
-	
+
 		FScopeLock ScopeLock(&VideoBufferMutex);
 		VideoDataQueue->Enqueue(FVideoData(DeltaTime,TextureData));
-	
+
 
 }
 
@@ -118,7 +118,7 @@ void FEncoderThread::RunEncode()
 void FEncoderThread::EncodeVideo() const
 {
 	FVideoData Data;
-	
+
 	if(VideoDataQueue->Dequeue(Data))
 	{
 		VideoEncodeDelegate.ExecuteIfBound(Data);
@@ -138,16 +138,22 @@ void FEncoderThread::EncodeAudio() const
 	{
 		AudioEncodeDelegate.ExecuteIfBound(Data);
 	}
-	
-	
+
+
 }
 
 bool FEncoderThread::IsFinished() const
 {
-	if(!VideoDataQueue||!AudioDataQueue)
+	// if(!VideoDataQueue||!AudioDataQueue)
+	// {
+	// 	return false;
+	// }
+	// return VideoDataQueue->IsEmpty()&&AudioDataQueue->IsEmpty();
+
+	if(!VideoDataQueue)
 	{
 		return false;
 	}
-	return VideoDataQueue->IsEmpty()&&AudioDataQueue->IsEmpty();
+	return VideoDataQueue->IsEmpty();
 
 }
